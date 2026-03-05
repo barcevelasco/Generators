@@ -621,46 +621,46 @@ elif modo_app == "Explorador de Categorías":
                     st.warning(f"No se encontraron documentos para las fechas seleccionadas.")
 
     else:
-    st.subheader("1. Selecciona el Mes y Año")
-    anios_str = ["2026", "2025", "2024", "2023", "2022", "2021", "2020"]
-    meses_dict = {
-        "Enero": 1, "Febrero": 2, "Marzo": 3, "Abril": 4, "Mayo": 5,
-        "Junio": 6, "Julio": 7, "Agosto": 8, "Septiembre": 9,
-        "Octubre": 10, "Noviembre": 11, "Diciembre": 12
+        st.subheader("1. Selecciona el Mes y Año")
+        anios_str = ["2026", "2025", "2024", "2023", "2022", "2021", "2020"]
+    m   eses_dict = {
+            "Enero": 1, "Febrero": 2, "Marzo": 3, "Abril": 4, "Mayo": 5,
+            "Junio": 6, "Julio": 7, "Agosto": 8, "Septiembre": 9,
+            "Octubre": 10, "Noviembre": 11, "Diciembre": 12
     }
 
-    col1, col2 = st.columns(2)
-    with col1: 
-        meses_seleccionados = st.multiselect("Mes(es)", options=list(meses_dict.keys()), default=[])
-    with col2: 
-        anios_seleccionados = st.multiselect("Año(s)", options=anios_str, default=["2026"])
+        col1, col2 = st.columns(2)
+        with col1: 
+            meses_seleccionados = st.multiselect("Mes(es)", options=list(meses_dict.keys()), default=[])
+        with col2: 
+            anios_seleccionados = st.multiselect("Año(s)", options=anios_str, default=["2026"])
 
-    buscar = st.button("🔍 Buscar", type="primary")
+        buscar = st.button("🔍 Buscar", type="primary")
 
-    if buscar or f"{tipo_doc.lower()}_df_filtrado" in st.session_state:
-        if not meses_seleccionados or not anios_seleccionados:
-            st.warning("⚠️ Por favor, selecciona al menos un mes y un año.")
-        else:
-            meses_num = [meses_dict[m] for m in meses_seleccionados]
-            anios_num = [int(a) for a in anios_seleccionados]
-            start_date = pd.Timestamp(year=min(anios_num), month=min(meses_num), day=1)
-            end_date = pd.Timestamp(year=max(anios_num), month=max(meses_num), day=1) + pd.offsets.MonthEnd(1)
+        if buscar or f"{tipo_doc.lower()}_df_filtrado" in st.session_state:
+            if not meses_seleccionados or not anios_seleccionados:
+                st.warning("⚠️ Por favor, selecciona al menos un mes y un año.")
+            else:
+                meses_num = [meses_dict[m] for m in meses_seleccionados]
+                anios_num = [int(a) for a in anios_seleccionados]
+                start_date = pd.Timestamp(year=min(anios_num), month=min(meses_num), day=1)
+                end_date = pd.Timestamp(year=max(anios_num), month=max(meses_num), day=1) + pd.offsets.MonthEnd(1)
 
-            lista_orgs = organismos[1:] if organismo_seleccionado == "Todos" else [organismo_seleccionado]
-            dfs_combinados = []
+                lista_orgs = organismos[1:] if organismo_seleccionado == "Todos" else [organismo_seleccionado]
+                dfs_combinados = []
 
-            progreso = st.progress(0)
-            status_text = st.empty()
+                progreso = st.progress(0)
+                status_text = st.empty()
 
-            for i, org in enumerate(lista_orgs):
-                status_text.text(f"Extrayendo {tipo_doc} de: {org}...")
-                df_org = pd.DataFrame()
+                for i, org in enumerate(lista_orgs):
+                    status_text.text(f"Extrayendo {tipo_doc} de: {org}...")
+                    df_org = pd.DataFrame()
 
-                # === FMI - Publicaciones Institucionales (F&D) ===
-                if org == "FMI":
-                    df_org = load_publicaciones_fmi_fandd()
+                    # === FMI - Publicaciones Institucionales (F&D) ===
+                    if org == "FMI":
+                        df_org = load_publicaciones_fmi_fandd()
 
-                # === Otros organismos (puedes expandir aquí) ===
+                    # === Otros organismos (puedes expandir aquí) ===
                 elif org in mapeo_discursos:
                     urls, base = mapeo_discursos[org]
                     df_temp = load_data_generic(urls, base, org, extract_author=False)
@@ -668,13 +668,13 @@ elif modo_app == "Explorador de Categorías":
                     df_temp["Title"] = df_temp["Title"].apply(lambda x: x.split(": ", 1)[-1] if ": " in x else x)
                     df_org = df_temp
 
-                # === Filtrar por rango de fechas ===
-                if not df_org.empty:
-                    mask = (df_org["Date"] >= start_date) & (df_org["Date"] <= end_date)
-                    df_filtered = df_org[mask].copy()
-                    if not df_filtered.empty:
-                        if 'Organismo' not in df_filtered.columns:
-                            df_filtered['Organismo'] = org
+                    # === Filtrar por rango de fechas ===
+                    if not df_org.empty:
+                        mask = (df_org["Date"] >= start_date) & (df_org["Date"] <= end_date)
+                        df_filtered = df_org[mask].copy()
+                        if not df_filtered.empty:
+                            if 'Organismo' not in df_filtered.columns:
+                                df_filtered['Organismo'] = org
                         dfs_combinados.append(df_filtered)
 
                 progreso.progress((i + 1) / len(lista_orgs))
