@@ -1091,7 +1091,7 @@ mapeo_discursos = {
 }
 
 # --- LISTAS DINÁMICAS DE ORGANISMOS ---
-orgs_discursos = ["BBk (Alemania)", "BdE (España)", "BdF (Francia)", "BM", "BoC (Canadá)", "BoJ (Japón)", "BPI", "CEF", "ECB (Europa)", "Fed (Estados Unidos)", "PBoC (China)"]
+orgs_discursos = ["BBk (Alemania)", "BdF (Francia)", "BM", "BoC (Canadá)", "BoJ (Japón)", "BPI", "CEF", "ECB (Europa)", "Fed (Estados Unidos)", "PBoC (China)"]
 orgs_reportes = ["BID", "OCDE", "CEF", "BPI"]
 orgs_pub_inst = ["BPI", "CEF"] # <-- ACTUALIZADO 
 orgs_investigacion = ["BPI"]
