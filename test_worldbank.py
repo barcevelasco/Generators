@@ -1,28 +1,54 @@
 import requests
+from datetime import datetime
+import csv
+
+MES = datetime.now().strftime("%Y-%m")
 
 url = "https://openknowledge.worldbank.org/server/api/discover/search/objects?sort=dc.date.issued,DESC"
 
 r = requests.get(url)
-
 data = r.json()
 
 objects = data["_embedded"]["searchResult"]["_embedded"]["objects"]
 
-for obj in objects:
+with open("data_worldbank.csv", "w", newline="", encoding="utf-8") as file:
 
-    item = obj["_embedded"]["indexableObject"]
+    writer = csv.writer(file)
 
-    titulo = item["name"]
-    handle = item["handle"]
+    writer.writerow(["tipo", "organismo", "fecha", "titulo", "link"])
 
-    metadata = item["metadata"]
+    encontrado = False
 
-    fecha = metadata["dc.date.issued"][0]["value"]
+    for obj in objects:
 
-    if fecha.startswith("2026-01"):
+        indexable = obj["_embedded"]["indexableObject"]
 
-        link = f"https://openknowledge.worldbank.org/handle/{handle}"
-        print(fecha)
-        print(titulo)
-        print(link)
-        print()
+        if "dc.date.issued" not in indexable:
+            continue
+
+        fecha = indexable["dc.date.issued"][0]["value"]
+
+        if MES in fecha:
+
+            titulo = indexable["dc.title"][0]["value"]
+
+            link = "https://openknowledge.worldbank.org" + obj["_embedded"]["indexableObject"]["handle"]
+
+            writer.writerow([
+                "Publicaciones Institucionales",
+                "World Bank",
+                fecha,
+                titulo,
+                link
+            ])
+
+            print("World Bank")
+            print(fecha)
+            print(titulo)
+            print(link)
+            print()
+
+            encontrado = True
+
+if not encontrado:
+    print("No se encontraron documentos para el mes:", MES)

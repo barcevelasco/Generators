@@ -14,6 +14,7 @@ import calendar
 import time
 import re
 from dateutil import parser
+from imf_data import get_fandd_march2026
 
 # ==========================================
 # CONFIGURACIÓN INICIAL Y ESTILOS
@@ -430,6 +431,21 @@ def load_pub_inst_bpi(start_date_str, end_date_str):
         df["Date"] = pd.to_datetime(df["Date"])
         if df["Date"].dt.tz is not None: df["Date"] = df["Date"].dt.tz_convert(None)
         df = df.sort_values("Date", ascending=False)
+    return df
+
+# ========== FUNCIÓN FINAL PARA FMI USANDO EL JSON DIRECTO ==========
+@st.cache_data(show_spinner=False)
+def load_pub_inst_imf(start_date_str, end_date_str):
+    """Usa datos precargados de F&D Magazine"""
+    try:
+        start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
+        end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+    except:
+        start_date = datetime.datetime(2000, 1, 1)
+        end_date = datetime.datetime.now()
+    
+    df = get_fandd_march2026()
+    df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
     return df
 
 # --- SECCIÓN: INVESTIGACIÓN ---
@@ -1093,9 +1109,25 @@ mapeo_discursos = {
 # --- LISTAS DINÁMICAS DE ORGANISMOS ---
 orgs_discursos = ["BBk (Alemania)", "BdF (Francia)", "BM", "BoC (Canadá)", "BoJ (Japón)", "BPI", "CEF", "ECB (Europa)", "Fed (Estados Unidos)", "PBoC (China)"]
 orgs_reportes = ["BID", "OCDE", "CEF", "BPI"]
-orgs_pub_inst = ["BPI", "CEF"] # <-- ACTUALIZADO 
+orgs_pub_inst = ["BPI", "CEF", "FMI", "BM"]  # AÑADIDO FMI Y BM
 orgs_investigacion = ["BPI"]
 
+# Mapeo de nombres para mostrar
+mapeo_organismos = {
+    "BM": "Banco Mundial",
+    "BPI": "Banco de Pagos Internacionales",
+    "CEF": "Consejo de Estabilidad Financiera",
+    "FMI": "Fondo Monetario Internacional",
+    "BID": "Banco Interamericano de Desarrollo",
+    "OCDE": "OCDE",
+    "BBk (Alemania)": "Bundesbank",
+    "BdF (Francia)": "Banque de France",
+    "BoC (Canadá)": "Bank of Canada",
+    "BoJ (Japón)": "Bank of Japan",
+    "ECB (Europa)": "Banco Central Europeo",
+    "Fed (Estados Unidos)": "Federal Reserve",
+    "PBoC (China)": "Banco Popular de China"
+}
 if modo_app == "Boletín":
     st.title("Generador de Boletín Mensual")
     st.markdown("Extrae y unifica documentos de todas las categorías y organismos por mes."); st.markdown("---")
@@ -1173,13 +1205,36 @@ if modo_app == "Boletín":
                 txt.text(f"Procesando Pub. Institucionales: {org}...")
                 df = pd.DataFrame()
                 try:
-                    if org == "BPI": df = load_pub_inst_bpi(sd, ed)
-                except Exception as e: pass 
+                    if org == "BPI": 
+                        df = load_pub_inst_bpi(sd, ed)
+                    elif org == "CEF":  # <-- AÑADIDO
+                        df = load_pub_inst_cef(sd, ed)
+                    elif org == "FMI":  # <-- AÑADIDO
+                        df = load_pub_inst_imf(sd, ed)
+                    elif org == "BM":   # <-- AÑADIDO
+                        df = load_data_bm(sd, ed) 
+                        if not df.empty:
+                            # Filtrar solo publicaciones institucionales relevantes
+                            palabras_clave = [
+                                'development report', 
+                                'economic prospects', 
+                                'business ready',
+                                'world development',
+                                'global economic'
+                            ]
+                            # Crear máscara para filtrar
+                            mascara = df['Title'].str.lower().str.contains('|'.join(palabras_clave), na=False)
+                            df = df[mascara]
+                except Exception as e: 
+                    print(f"Error en {org}: {e}")
+                    continue                             
                 
                 if not df.empty:
                     df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
                     df_f = df[(df["Date"].dt.year.isin(a_num)) & (df["Date"].dt.month.isin(m_num))].copy()
                     if not df_f.empty: 
+                        # Usar nombre bonito del mapeo
+                        nombre_mostrar = mapeo_organismos.get(org, org)
                         df_f['Organismo'] = org
                         df_f['Categoría'] = "Publicaciones Institucionales"
                         all_dfs.append(df_f)
@@ -1301,9 +1356,25 @@ elif modo_app == "Categorías":
                         if o == "BPI": df = load_investigacion_bpi(sd, ed)
                         
                     elif tipo_doc == "Publicaciones Institucionales":
-                        if o == "BPI": df = load_pub_inst_bpi(sd, ed)
-                        elif o == "CEF": df = load_pub_inst_cef(sd, ed) # <-- LÍNEA CORREGIDA
-                        
+                        if o == "BPI": 
+                            df = load_pub_inst_bpi(sd, ed)
+                        elif o == "CEF": 
+                            df = load_pub_inst_cef(sd, ed) # <-- LÍNEA CORREGIDA
+                        elif o == "FMI":  # <--- NUEVO: AGREGAR ESTAS 3 LÍNEAS
+                            df = load_pub_inst_imf(sd, ed)
+                        elif o == "BM":   # <--- NUEVO: AGREGAR ESTAS 8 LÍNEAS
+                            df = load_data_bm(sd, ed)
+                            if not df.empty:
+                                palabras_clave = [
+                                    'development report', 
+                                    'economic prospects', 
+                                    'business ready',
+                                    'world development',
+                                    'global economic'
+                                ]
+                                mascara = df['Title'].str.lower().str.contains('|'.join(palabras_clave), na=False)
+                                df = df[mascara]
+
                 except Exception as e:
                     pass
                 

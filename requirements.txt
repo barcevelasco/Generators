@@ -6,3 +6,5 @@ python-docx
 html5lib
 lxml
 python-dateutil
+selenium
+webdriver-manager
