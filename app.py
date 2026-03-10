@@ -448,15 +448,21 @@ def load_pub_inst_imf(start_date_str, end_date_str):
     df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
     return df
 
-# ========== FUNCIÓN FINAL PARA CEMLA USANDO HTML DIRECTO ==========
+# ========== FUNCIÓN PARA CEMLA (VERSIÓN BASADA EN PATRONES) ==========
 @st.cache_data(show_spinner=False)
 def load_pub_inst_cemla(start_date_str, end_date_str):
-    """Extractor para Boletín CEMLA (sin Selenium, directo del HTML)"""
-    url = "https://www.cemla.org/comunicados.html"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    """Extractor para Boletín CEMLA (basado en patrones de fecha)"""
+    import requests
+    from bs4 import BeautifulSoup
+    import datetime
+    import re
+    import pandas as pd
 
-    print("🔍 Iniciando extracción de CEMLA (modo directo)")
-    
+    url = "https://www.cemla.org/comunicados.html"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+    print("🔍 Iniciando extracción de CEMLA (versión por patrones)")
+
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
         end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
@@ -465,116 +471,97 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
         end_date = datetime.datetime.now() + datetime.timedelta(days=365)
 
     rows = []
+    meses_map = {
+        'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
+        'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
+        'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12,
+        'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12
+    }
 
     try:
+        print(f"📡 Solicitando {url}...")
         res = requests.get(url, headers=headers, timeout=15)
         print(f"📡 Estado HTTP: {res.status_code}")
+
         if res.status_code != 200:
             return pd.DataFrame()
 
-        # Guardar y mostrar parte del HTML para depurar
-        with open("cemla_debug.html", "w", encoding="utf-8") as f:
-            f.write(res.text[:5000])  # Guardar los primeros 5000 caracteres
-        print("📄 HTML guardado en 'cemla_debug.html' para inspección")
-        print("🔍 Primeros 500 caracteres del HTML recibido:")
-        print(res.text[:500])
-        print("..." + "-"*50)
-
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        # Buscar el encabezado "Boletín CEMLA"
-        h2 = soup.find('h2', string=re.compile(r'Boletín CEMLA', re.I))
-        if not h2:
-            print("❌ No se encontró el encabezado 'Boletín CEMLA'")
-            return pd.DataFrame()
-        else:
-            print("✅ Sección 'Boletín CEMLA' encontrada")
+        # Buscar TODOS los elementos que podrían ser boletines
+        # Patrón: texto que empieza con mes y año (ej: "Enero 2026")
+        for element in soup.find_all(['p', 'div', 'h3', 'h4']):
+            text = element.get_text(strip=True)
+            
+            # Buscar patrón "Mes Año" al inicio del texto
+            match = re.match(r'^([A-Za-z]+)\s+(\d{4})', text)
+            if not match:
+                continue
 
-        # Buscar todos los <h4> de años después del h2
-        current = h2.find_next()
-        year_headers = []
-        while current:
-            if current.name == 'h4':
-                year_text = current.get_text(strip=True)
-                if re.match(r'^\d{4}$', year_text):
-                    year_headers.append(current)
-            elif current.name == 'h2':  # Otro h2 = nueva sección
-                break
-            current = current.find_next_sibling()
+            mes_str, year_str = match.groups()
+            mes_num = meses_map.get(mes_str.lower())
+            
+            if not mes_num:
+                continue
 
-        if not year_headers:
-            print("⚠️ No se encontraron años bajo 'Boletín CEMLA'")
-            return pd.DataFrame()
-
-        for h4 in year_headers:
-            year_text = h4.get_text(strip=True)
             try:
-                year = int(year_text)
+                fecha = datetime.datetime(int(year_str), mes_num, 1)
             except:
                 continue
+
+            # Buscar el enlace "Ver más..." cercano
+            link = None
+            # Buscar en el mismo elemento
+            a_tag = element.find('a', href=True, string=re.compile(r'Ver más', re.I))
+            if not a_tag:
+                # Buscar en el siguiente hermano
+                next_elem = element.find_next_sibling()
+                if next_elem:
+                    a_tag = next_elem.find('a', href=True, string=re.compile(r'Ver más', re.I))
             
-            if year < start_date.year or year > end_date.year:
+            if a_tag:
+                href = a_tag.get('href')
+                if href:
+                    if href.startswith('/'):
+                        link = f"https://www.cemla.org{href}"
+                    elif href.startswith('http'):
+                        link = href
+                    else:
+                        link = f"https://www.cemla.org/{href}"
+
+            if not link:
                 continue
 
-            ul = h4.find_next_sibling('ul', class_='iconlist')
-            if not ul:
-                continue
+            # Crear título con el texto completo
+            # Limitar a 200 caracteres para no hacer el título muy largo
+            title_text = text[:200] + "..." if len(text) > 200 else text
 
-            for li in ul.find_all('li'):
-                a_tag = li.find('a')
-                if not a_tag or not a_tag.get('href'):
-                    continue
-
-                link = a_tag['href']
-                title_raw = a_tag.get_text(strip=True)
-
-                # Extraer mes y año del título
-                match = re.search(r'([A-Za-z]+)\s+(\d{4})', title_raw, re.IGNORECASE)
-                if not match:
-                    continue
-
-                mes_str, year_str = match.groups()
-                mes_num = {
-                    'Enero': 1, 'Febrero': 2, 'Marzo': 3, 'Abril': 4,
-                    'Mayo': 5, 'Junio': 6, 'Julio': 7, 'Agosto': 8,
-                    'Septiembre': 9, 'Octubre': 10, 'Noviembre': 11, 'Diciembre': 12
-                }.get(mes_str.capitalize(), None)
-                
-                if not mes_num:
-                    continue
-                
-                parsed_date = datetime.datetime(int(year_str), mes_num, 1)
-                
-                if parsed_date < start_date or parsed_date > end_date:
-                    continue
-                
-                p_text = li.find('p')
-                summary = p_text.get_text(strip=True) if p_text else ""
-                if len(summary) > 100:
-                    summary = summary[:100] + "..."
-
-                final_title = f"{title_raw}: {summary}" if summary else title_raw
-                
-                rows.append({
-                    "Date": parsed_date,
-                    "Title": final_title,
-                    "Link": link,
-                    "Organismo": "CEMLA"
-                })
-                print(f"✅ Agregado: {title_raw} ({parsed_date.strftime('%Y-%m')})")
+            rows.append({
+                "Date": fecha,
+                "Title": title_text,
+                "Link": link,
+                "Organismo": "CEMLA"
+            })
+            print(f"✅ {fecha.strftime('%Y-%m')}: {title_text[:50]}...")
 
     except Exception as e:
-        print(f"❌ Error CRÍTICO en CEMLA: {e}")
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
-    print(f"✅ CEMLA: Se extrajeron {len(rows)} documentos")
+    # Filtrar por rango de fechas
     df = pd.DataFrame(rows)
     if not df.empty:
         df["Date"] = pd.to_datetime(df["Date"])
+        df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
         df = df.sort_values("Date", ascending=False)
-    
-    return df
+        print(f"✅ Total después de filtrar: {len(df)} documentos")
+    else:
+        print("⚠️ No se encontraron documentos")
 
+    return df
 
 # --- SECCIÓN: INVESTIGACIÓN ---
 @st.cache_data(show_spinner=False)
