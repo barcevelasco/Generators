@@ -448,20 +448,21 @@ def load_pub_inst_imf(start_date_str, end_date_str):
     df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
     return df
 
-# ========== FUNCIÓN PARA CEMLA (VERSIÓN BASADA EN PATRONES) ==========
+# ========== FUNCIÓN PARA CEMLA CON EXTRACCIÓN DE NOVEDADES ==========
 @st.cache_data(show_spinner=False)
 def load_pub_inst_cemla(start_date_str, end_date_str):
-    """Extractor para Boletín CEMLA (basado en patrones de fecha)"""
+    """Extractor para Boletín CEMLA que incluye novedades individuales"""
     import requests
     from bs4 import BeautifulSoup
     import datetime
     import re
     import pandas as pd
+    import time
 
     url = "https://www.cemla.org/comunicados.html"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-    print("🔍 Iniciando extracción de CEMLA (versión por patrones)")
+    print("🔍 Iniciando extracción de CEMLA con novedades individuales...")
 
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
@@ -475,33 +476,23 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
         'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
         'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
         'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12,
-        'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
-        'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12
     }
 
     try:
-        print(f"📡 Solicitando {url}...")
+        # 1. OBTENER LISTA DE BOLETINES PRINCIPALES
+        print(f"📡 Solicitando lista de boletines...")
         res = requests.get(url, headers=headers, timeout=15)
-        print(f"📡 Estado HTTP: {res.status_code}")
-
-        if res.status_code != 200:
-            return pd.DataFrame()
-
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        # Buscar TODOS los elementos que podrían ser boletines
-        # Patrón: texto que empieza con mes y año (ej: "Enero 2026")
+        boletines = []
         for element in soup.find_all(['p', 'div', 'h3', 'h4']):
             text = element.get_text(strip=True)
-            
-            # Buscar patrón "Mes Año" al inicio del texto
             match = re.match(r'^([A-Za-z]+)\s+(\d{4})', text)
             if not match:
                 continue
 
             mes_str, year_str = match.groups()
             mes_num = meses_map.get(mes_str.lower())
-            
             if not mes_num:
                 continue
 
@@ -510,12 +501,9 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
             except:
                 continue
 
-            # Buscar el enlace "Ver más..." cercano
-            link = None
-            # Buscar en el mismo elemento
+            # Buscar enlace al boletín completo
             a_tag = element.find('a', href=True, string=re.compile(r'Ver más', re.I))
             if not a_tag:
-                # Buscar en el siguiente hermano
                 next_elem = element.find_next_sibling()
                 if next_elem:
                     a_tag = next_elem.find('a', href=True, string=re.compile(r'Ver más', re.I))
@@ -529,80 +517,110 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
                         link = href
                     else:
                         link = f"https://www.cemla.org/{href}"
+                    
+                    boletines.append({
+                        'fecha': fecha,
+                        'titulo': text,
+                        'link': link
+                    })
+                    print(f"📌 Boletín encontrado: {fecha.strftime('%Y-%m')}")
 
-            if not link:
+        print(f"✅ Total boletines principales: {len(boletines)}")
+
+        # 2. PARA CADA BOLETÍN, EXTRAER NOVEDADES INDIVIDUALES
+        for boletin in boletines:
+            if boletin['fecha'] < start_date or boletin['fecha'] > end_date:
                 continue
 
-            # Crear título con el texto completo
-            # Limitar a 200 caracteres para no hacer el título muy largo
-            title_text = text[:200] + "..." if len(text) > 200 else text
+            print(f"\n🔍 Procesando boletín {boletin['fecha'].strftime('%Y-%m')}: {boletin['link']}")
+            
+            try:
+                # Pequeña pausa para no saturar el servidor
+                time.sleep(1)
+                
+                res_boletin = requests.get(boletin['link'], headers=headers, timeout=15)
+                if res_boletin.status_code != 200:
+                    print(f"  ⚠️ Error al acceder al boletín: {res_boletin.status_code}")
+                    continue
 
-            rows.append({
-                "Date": fecha,
-                "Title": title_text,
-                "Link": link,
-                "Organismo": "CEMLA"
-            })
-            print(f"✅ {fecha.strftime('%Y-%m')}: {title_text[:50]}...")
+                soup_boletin = BeautifulSoup(res_boletin.text, 'html.parser')
+                
+                # Buscar la sección de "Novedades" - normalmente en un contenedor específico
+                # Basado en el HTML de mailchi.mp, las novedades suelen estar en elementos con clase 'mcnTextContent'
+                novedades = []
+                
+                # Estrategia 1: Buscar enlaces que parezcan novedades
+                for a in soup_boletin.find_all('a', href=True):
+                    href = a.get('href', '')
+                    text = a.get_text(strip=True)
+                    
+                    # Filtrar enlaces que sean relevantes (no redes sociales, no suscripción, etc.)
+                    if any(term in href.lower() for term in ['cemla.org', '.pdf', 'premiodebancacentral', 'foroderemesas']):
+                        if len(text) > 10:  # Título con sentido
+                            # Buscar descripción cercana
+                            desc = ""
+                            parent = a.find_parent(['p', 'div', 'td'])
+                            if parent:
+                                desc = parent.get_text(strip=True).replace(text, '').strip()
+                                if len(desc) > 200:
+                                    desc = desc[:200] + "..."
+                            
+                            titulo_completo = f"{boletin['titulo']} - {text}"
+                            if desc:
+                                titulo_completo += f": {desc}"
+                            
+                            novedades.append({
+                                'Date': boletin['fecha'],
+                                'Title': titulo_completo,
+                                'Link': href if href.startswith('http') else f"https://www.cemla.org/{href}",
+                                'Organismo': "CEMLA"
+                            })
+                            print(f"  ✅ Novedad: {text[:50]}...")
+                
+                # Estrategia 2: Si no encontramos nada, buscar patrones específicos
+                if not novedades:
+                    # Buscar elementos que contengan "Leer más"
+                    for elem in soup_boletin.find_all(['a', 'span', 'div'], string=re.compile(r'Leer más', re.I)):
+                        a_tag = elem.find_parent('a') if elem.name != 'a' else elem
+                        if a_tag and a_tag.get('href'):
+                            href = a_tag['href']
+                            # Buscar el título (puede estar antes)
+                            prev = a_tag.find_previous(['h1', 'h2', 'h3', 'h4', 'p', 'strong'])
+                            titulo = prev.get_text(strip=True) if prev else "Novedad CEMLA"
+                            
+                            if len(titulo) > 200:
+                                titulo = titulo[:200] + "..."
+                            
+                            novedades.append({
+                                'Date': boletin['fecha'],
+                                'Title': f"{boletin['titulo']} - {titulo}",
+                                'Link': href if href.startswith('http') else f"https://www.cemla.org/{href}",
+                                'Organismo': "CEMLA"
+                            })
+                            print(f"  ✅ Novedad (Leer más): {titulo[:50]}...")
+                
+                rows.extend(novedades)
+                print(f"  📊 Total novedades en este boletín: {len(novedades)}")
+                
+            except Exception as e:
+                print(f"  ❌ Error procesando boletín: {e}")
+                continue
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error general: {e}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()
 
-    # Filtrar por rango de fechas
+    # Filtrar y ordenar
     df = pd.DataFrame(rows)
     if not df.empty:
         df["Date"] = pd.to_datetime(df["Date"])
-        df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
         df = df.sort_values("Date", ascending=False)
-        print(f"✅ Total después de filtrar: {len(df)} documentos")
+        print(f"\n✅ TOTAL: {len(df)} novedades individuales extraídas")
     else:
-        print("⚠️ No se encontraron documentos")
+        print("⚠️ No se encontraron novedades")
 
-    return df
-
-# --- SECCIÓN: INVESTIGACIÓN ---
-@st.cache_data(show_spinner=False)
-def load_investigacion_bpi(start_date_str, end_date_str):
-    urls_api = [
-        "https://www.bis.org/api/document_lists/bispapers.json",
-        "https://www.bis.org/api/document_lists/wppubls.json"
-    ]
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    try: start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
-    except: start_date = datetime.datetime(2000, 1, 1)
-
-    rows = []
-    for url in urls_api:
-        try:
-            res = requests.get(url, headers=headers, timeout=15)
-            data = res.json()
-            lista_documentos = data.get("list", {})
-            for path, doc_info in lista_documentos.items():
-                titulo = html.unescape(doc_info.get("short_title", ""))
-                if not titulo: continue
-                link = "https://www.bis.org" + doc_info.get("path", "")
-                if not link.endswith(".htm") and not link.endswith(".pdf"):
-                    link += ".htm"
-                date_str = doc_info.get("publication_start_date", "")
-                parsed_date = None
-                if date_str:
-                    try: parsed_date = parser.parse(date_str)
-                    except: pass
-                if not parsed_date: continue
-                if parsed_date >= start_date:
-                    rows.append({"Date": parsed_date, "Title": titulo, "Link": link, "Organismo": "BPI"})
-        except Exception as e:
-            continue
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.drop_duplicates(subset=['Link'])
-        df["Date"] = pd.to_datetime(df["Date"])
-        if df["Date"].dt.tz is not None: df["Date"] = df["Date"].dt.tz_convert(None)
-        df = df.sort_values("Date", ascending=False)
     return df
 
 # --- SECCIÓN: DISCURSOS ---
