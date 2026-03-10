@@ -612,16 +612,75 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
         traceback.print_exc()
         return pd.DataFrame()
 
-    # Filtrar y ordenar
+    # Crear DataFrame y eliminar duplicados
     df = pd.DataFrame(rows)
     if not df.empty:
         df["Date"] = pd.to_datetime(df["Date"])
+        
+        # ===== ELIMINAR DUPLICADOS =====
+        print(f"\n🔍 Eliminando duplicados...")
+        print(f"   Antes: {len(df)} registros")
+        
+        # Eliminar duplicados exactos (misma fecha + mismo link)
+        df = df.drop_duplicates(subset=['Date', 'Link'], keep='first')
+        
+        # Opcional: eliminar enlaces obvios que no son relevantes
+        enlaces_a_excluir = [
+            'twitter.com/share',
+            'mailchi.mp/cemla.org/boletin',
+            'e=UNIQID'
+        ]
+        
+        for excluir in enlaces_a_excluir:
+            df = df[~df['Link'].str.contains(excluir, na=False)]
+        
+        print(f"   Después: {len(df)} registros")
+        
+        # Ordenar por fecha descendente
         df = df.sort_values("Date", ascending=False)
-        print(f"\n✅ TOTAL: {len(df)} novedades individuales extraídas")
     else:
         print("⚠️ No se encontraron novedades")
 
     return df
+
+# ========== FUNCIÓN DE DEPURACIÓN PARA BID ==========
+@st.cache_data(show_spinner=False)
+def load_investigacion_bid(start_date_str, end_date_str):
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    import time
+    
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    
+    url = "https://publications.iadb.org/es?f%5B0%5D=type%3A4633&f%5B1%5D=type%3ADocumentos%20de%20Trabajo"
+    print(f"🔍 Accediendo a: {url}")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.get(url)
+    time.sleep(5)
+    
+    # Guardar el HTML completo
+    with open("bid_debug_full.html", "w", encoding="utf-8") as f:
+        f.write(driver.page_source)
+    print("✅ HTML guardado como 'bid_debug_full.html'")
+    
+    # Buscar cualquier elemento con 'views-row'
+    elementos = driver.find_elements(By.CSS_SELECTOR, "[class*='views-row']")
+    print(f"🔎 Elementos con 'views-row' en clase: {len(elementos)}")
+    
+    # Buscar específicamente el texto de fecha
+    page_text = driver.page_source
+    if "Feb 2026" in page_text:
+        print("✅ ¡'Feb 2026' ENCONTRADO en el HTML!")
+    else:
+        print("❌ 'Feb 2026' NO encontrado en el HTML")
+    
+    driver.quit()
+    return pd.DataFrame()
 
 # --- SECCIÓN: DISCURSOS ---
 @st.cache_data(show_spinner=False)
@@ -1243,7 +1302,7 @@ mapeo_discursos = {
 orgs_discursos = ["BBk (Alemania)", "BdF (Francia)", "BM", "BoC (Canadá)", "BoJ (Japón)", "BPI", "CEF", "ECB (Europa)", "Fed (Estados Unidos)", "PBoC (China)"]
 orgs_reportes = ["BID", "OCDE", "CEF", "BPI"]
 orgs_pub_inst = ["BPI", "CEF", "FMI", "BM", "CEMLA"]  # AÑADIDO FMI Y BM - LUEGO CEMLA (Marzo 9-2026)
-orgs_investigacion = ["BPI"]
+orgs_investigacion = ["BPI", "BID"] # Añadido BID
 
 # Mapeo de nombres para mostrar
 mapeo_organismos = {
@@ -1385,8 +1444,13 @@ if modo_app == "Boletín":
                 txt.text(f"Procesando Investigación: {org}...")
                 df = pd.DataFrame()
                 try:
-                    if org == "BPI": df = load_investigacion_bpi(sd, ed)
-                except Exception as e: pass 
+                    if org == "BPI": 
+                        df = load_investigacion_bpi(sd, ed)
+                    elif org == "BID":  # <-- NUEVO
+                        df = load_investigacion_bid(sd, ed)
+                except Exception as e: 
+                    print(f"Error en {org}: {e}")
+                    continue
                 
                 if not df.empty:
                     df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
@@ -1493,8 +1557,11 @@ elif modo_app == "Categorías":
                         elif o == "BPI": df = load_reportes_bpi(sd, ed) 
                         
                     elif tipo_doc == "Investigación":
-                        if o == "BPI": df = load_investigacion_bpi(sd, ed)
-                        
+                        if o == "BPI": 
+                            df = load_investigacion_bpi(sd, ed)
+                        elif o == "BID":  # <-- NUEVO
+                            df = load_investigacion_bid(sd, ed)
+
                     elif tipo_doc == "Publicaciones Institucionales":
                         if o == "BPI": 
                             df = load_pub_inst_bpi(sd, ed)
