@@ -646,169 +646,201 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
 # BID 
 @st.cache_data(show_spinner=False)
 def load_investigacion_bid(start_date_str, end_date_str):
-    import requests
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
     from bs4 import BeautifulSoup
     import datetime
-    import re
     import pandas as pd
     import time
-    
+    import re
+    from dateutil import parser
+
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
         end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
     except:
         start_date = datetime.datetime(2000, 1, 1)
         end_date = datetime.datetime.now()
-    
+
     rows = []
     
-    # URL base de la serie de IDB Publications en RePEc
-    base_url = "https://ideas.repec.org/s/idb/brikps.html"
+    # <-- NUEVO: Configuración de paginación
+    page = 0
+    max_pages = 5  # Límite de páginas a extraer
+    hay_resultados = True
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-    
-    meses_map = {
-        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
-        'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12,
-    }
-    
-    try:
-        print("🔍 Extrayendo Working Papers del BID desde RePEc...")
-        
-        response = requests.get(base_url, headers=headers, timeout=15)
-        
-        if response.status_code != 200:
-            print(f"❌ Error HTTP {response.status_code}")
-            return pd.DataFrame()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Buscar TODOS los años (h3) y sus listas de papers
-        for year_header in soup.find_all('h3'):
-            year_text = year_header.get_text(strip=True)
-            # Verificar que sea un año (ej: "2025", "2024")
-            if not re.match(r'^\d{4}$', year_text):
-                continue
-            
-            year = int(year_text)
-            
-            # La lista de papers está en el div siguiente al h3
-            list_div = year_header.find_next('div', class_='panel-body')
-            if not list_div:
-                continue
-            
-            # Encontrar todos los items de la lista
-            papers = list_div.find_all('li', class_='list-group-item')
-            
-            for paper in papers:
-                try:
-                    # Extraer número de documento (opcional)
-                    doc_num = ""
-                    doc_num_match = re.search(r'<b>(\d+)', str(paper))
-                    if doc_num_match:
-                        doc_num = doc_num_match.group(1)
-                    
-                    # Extraer título
-                    a_tag = paper.find('a')
-                    if not a_tag:
-                        continue
-                    
-                    titulo = a_tag.get_text(strip=True)
-                    ideas_link = a_tag.get('href', '')
-                    if ideas_link and not ideas_link.startswith('http'):
-                        ideas_link = f"https://ideas.repec.org{ideas_link}"
-                    
-                    # Extraer autores
-                    autores = ""
-                    i_tag = paper.find('i')
-                    if i_tag:
-                        autores_raw = i_tag.get_text(strip=True).replace('by', '').strip()
-                        if autores_raw:
-                            autores = f" - {autores_raw}"
-                    
-                    # Crear fecha base
-                    fecha = datetime.datetime(year, 1, 1)
-                    
-                    # Filtrar por rango de años
-                    if fecha.year < start_date.year or fecha.year > end_date.year:
-                        continue
-                    
-                    # ----- ENTRAR A LA PÁGINA INDIVIDUAL PARA EXTRAER EL DOI -----
-                    print(f"  🔍 Buscando DOI para: {titulo[:50]}...")
-                    
-                    # Pequeña pausa para no saturar el servidor
-                    time.sleep(0.5)
-                    
-                    try:
-                        paper_response = requests.get(ideas_link, headers=headers, timeout=10)
-                        if paper_response.status_code == 200:
-                            paper_soup = BeautifulSoup(paper_response.text, 'html.parser')
-                            
-                            # Buscar el DOI de varias formas:
-                            doi_final = None
-                            
-                            # 1. Buscar en meta tags
-                            # Primero intentar con name="DOI"
-                            meta_doi = paper_soup.find('meta', attrs={'name': 'DOI'})
-                            if meta_doi and meta_doi.get('content'):
-                                doi_final = meta_doi['content']
-                                print(f"    ✅ DOI encontrado en meta tag (name='DOI'): {doi_final}")
-                            
-                            # 2. Si no, intentar con name="citation_doi"
-                            if not doi_final:
-                                meta_doi = paper_soup.find('meta', attrs={'name': 'citation_doi'})
-                                if meta_doi and meta_doi.get('content'):
-                                    doi_final = meta_doi['content']
-                                    print(f"    ✅ DOI encontrado en meta tag (citation_doi): {doi_final}")
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
 
-                            # 2. Buscar enlace que contenga doi.org
-                            if not doi_final:
-                                for a in paper_soup.find_all('a', href=True):
-                                    href = a['href']
-                                    if 'doi.org' in href:
-                                        doi_final = href
-                                        print(f"    ✅ DOI encontrado en enlace: {doi_final}")
-                                        break
-                            
-                            # 3. Si no hay DOI, usar el enlace de IDEAS
-                            if not doi_final:
-                                doi_final = ideas_link
-                                print(f"    ⚠️ No se encontró DOI, usando enlace IDEAS")
-                        else:
-                            doi_final = ideas_link
-                            print(f"    ⚠️ Error al acceder a la página, usando enlace IDEAS")
-                            
-                    except Exception as e:
-                        doi_final = ideas_link
-                        print(f"    ⚠️ Error: {e}, usando enlace IDEAS")
-                    
+    try:
+        print("🔍 Iniciando Selenium con opciones anti-detección...")
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # <-- NUEVO: Bucle de paginación
+        while page < max_pages and hay_resultados:
+            # Construir URL con el número de página
+            url = f"https://publications.iadb.org/es?f%5B0%5D=type%3A4633&f%5B1%5D=type%3ADocumentos%20de%20Trabajo&page={page}"
+            
+            print(f"📄 Accediendo a página {page+1}: {url}")
+            driver.get(url)
+
+            try:
+                WebDriverWait(driver, 20).until_not(
+                    EC.title_contains("Just a moment")
+                )
+                print(f"✅ Página {page+1} cargada correctamente.")
+            except:
+                print(f"⚠️ La página {page+1} sigue mostrando 'Just a moment...', esperando...")
+                time.sleep(10)
+
+            # Esperar a que la página cargue completamente
+            time.sleep(5)
+
+            html = driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # Guardar HTML para depuración (solo la primera página)
+            if page == 0:
+                with open("bid_debug_selenium.html", "w", encoding="utf-8") as f:
+                    f.write(html)
+                print("💾 HTML guardado en bid_debug_selenium.html")
+
+            # --- ESTRATEGIAS DE BÚSQUEDA MEJORADAS ---
+            items = []
+
+            # Estrategia 1: Buscar por la clase específica de los resultados
+            items = soup.find_all('div', class_='views-row')
+            print(f"📚 Página {page+1} - Estrategia 1 (views-row): {len(items)} elementos")
+
+            # Estrategia 2: Buscar por etiquetas 'article'
+            if not items:
+                items = soup.find_all('article')
+                print(f"📚 Página {page+1} - Estrategia 2 (article): {len(items)} elementos")
+
+            # Estrategia 3: Buscar cualquier enlace que pueda ser un título de publicación
+            if not items:
+                potential_items = []
+                for a_tag in soup.find_all('a', href=True):
+                    if len(a_tag.get_text(strip=True)) > 30 and '/es/' in a_tag['href'] and 'publication' not in a_tag['href']:
+                        parent = a_tag.find_parent(['div', 'article', 'li'])
+                        if parent and parent not in potential_items:
+                            potential_items.append(parent)
+                items = potential_items
+                print(f"📚 Página {page+1} - Estrategia 3 (búsqueda por enlaces): {len(items)} elementos potenciales")
+
+            # Estrategia 4: Buscar por contenedores de fecha
+            if not items:
+                date_containers = soup.find_all('span', class_=lambda c: c and ('date' in c.lower() or 'issued' in c.lower()))
+                items = [dc.find_parent(['div', 'article']) for dc in date_containers if dc.find_parent(['div', 'article'])]
+                items = list(set(items))
+                print(f"📚 Página {page+1} - Estrategia 4 (búsqueda por fecha): {len(items)} elementos")
+
+            print(f"📚 Página {page+1} - Total elementos a procesar: {len(items)}")
+
+            # Si no hay elementos en esta página, terminamos
+            if len(items) == 0:
+                print(f"📭 No hay más elementos en página {page+1}, finalizando paginación.")
+                hay_resultados = False
+                break
+
+            # Mapeo de meses en español
+            meses = {
+                'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
+                'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12,
+                'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+                'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+            }
+
+            for idx, item in enumerate(items):
+                # Intentar extraer título y enlace
+                title_elem = None
+                for selector in ['a', 'h2 a', 'h3 a', 'h4 a', '.title a']:
+                    title_elem = item.find('a', href=True) if selector == 'a' else item.select_one(selector)
+                    if title_elem:
+                        break
+
+                if not title_elem:
+                    continue
+
+                titulo = title_elem.get_text(strip=True)
+                link = title_elem['href']
+                if not link.startswith('http'):
+                    link = "https://publications.iadb.org" + link
+
+                # Extraer fecha
+                date_elem = None
+                for selector in ['span.date-display-single', 'span.field-content', '.views-field-field-date-issued-text', 'span', 'div']:
+                    date_candidates = item.find_all(selector)
+                    for dc in date_candidates:
+                        if re.search(r'[Ee]ne|[Ff]eb|[Mm]ar|[Aa]br|[Mm]ay|[Jj]un|[Jj]ul|[Aa]go|[Ss]ep|[Oo]ct|[Nn]ov|[Dd]ic|202[4-9]', dc.get_text()):
+                            date_elem = dc
+                            break
+                    if date_elem:
+                        break
+
+                parsed_date = None
+                if date_elem:
+                    date_text = date_elem.get_text(strip=True)
+                    # Intentar parsear con regex primero
+                    match = re.search(r'(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+(\d{4})', date_text, re.IGNORECASE)
+                    if match:
+                        mes_str, año_str = match.groups()
+                        mes_num = meses.get(mes_str.lower(), 1)
+                        parsed_date = datetime.datetime(int(año_str), mes_num, 1)
+                    else:
+                        try:
+                            parsed_date = parser.parse(date_text, fuzzy=True)
+                        except:
+                            pass
+
+                if not parsed_date:
+                    continue
+
+                # Filtrar por fecha
+                if parsed_date < start_date or parsed_date > end_date:
+                    continue
+
+                # Evitar duplicados
+                if not any(r['Link'] == link for r in rows):
                     rows.append({
-                        "Date": fecha,
-                        "Title": f"{titulo}{autores}",
-                        "Link": doi_final,  # <-- AHORA ES EL DOI O ENLACE IDEAS
+                        "Date": parsed_date,
+                        "Title": titulo,
+                        "Link": link,
                         "Organismo": "BID"
                     })
-                    print(f"  ✅ {year}: {titulo[:50]}...")
-                    
-                except Exception as e:
-                    print(f"  ⚠️ Error procesando paper: {e}")
-                    continue
-        
-        print(f"\n✅ TOTAL Working Papers BID en RePEc: {len(rows)} documentos")
-        
+
+            # <-- NUEVO: Avanzar a la siguiente página
+            page += 1
+            print(f"➡️ Avanzando a página {page+1}...\n")
+
+        driver.quit()
+
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error en Selenium: {e}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()
-    
+
     df = pd.DataFrame(rows)
     if not df.empty:
+        df = df.drop_duplicates(subset=['Link'])
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.sort_values("Date", ascending=False)
-    
+        print(f"\n✅ Documentos BID encontrados en {page} páginas: {len(df)}")
+    else:
+        print("\n⚠️ No se encontraron documentos del BID")
+
     return df
     
 # --- SECCIÓN: DISCURSOS ---
@@ -1612,6 +1644,15 @@ if modo_app == "Boletín":
                 # Unimos respetando tu jerarquía exacta
                 f_df = pd.concat([df_rep, df_pub, df_inv, df_disc], ignore_index=True)
                 
+                # 👇 AGREGAR AQUÍ EL CÓDIGO DE DEPURACIÓN
+                print("🔍 DEPURACIÓN - Columnas del DataFrame:", f_df.columns.tolist())
+                print("🔍 DEPURACIÓN - Primeras 2 filas:")
+                columnas_existentes = [col for col in ['Categoría', 'Organismo', 'Title', 'Link'] if col in f_df.columns]
+                if columnas_existentes:
+                    print(f_df[columnas_existentes].head(2).to_string())
+                print("🔍 DEPURACIÓN - Tipo de datos:", f_df.dtypes)
+                # 👆 FIN DEL CÓDIGO DE DEPURACIÓN
+
                 # 2. COLUMNAS: Dejamos las 3 solicitadas + Link
                 f_df = f_df[['Categoría', 'Organismo', 'Title', 'Link']]
                 f_df = f_df.rename(columns={"Categoría": "Tipo de Documento", "Title": "Nombre de Documento"})
@@ -1621,9 +1662,11 @@ if modo_app == "Boletín":
                 st.download_button("📄 Descargar Boletín", word, f"Boletin_{'_'.join(m_sel)}.docx")
                 
                 disp = f_df.copy()
-                disp["Nombre de Documento"] = disp.apply(lambda x: f"[{x['Nombre de Documento']}]({x['Link']})", axis=1)
-                st.markdown(disp[["Tipo de Documento", "Organismo", "Nombre de Documento"]].to_markdown(index=False), unsafe_allow_html=True)
-            else: 
+                disp["Documento con Enlace"] = disp.apply(
+                    lambda x: f"[{x['Nombre de Documento']}]({x['Link']})", 
+                    axis=1
+                )
+                st.markdown(disp[["Tipo de Documento", "Organismo", "Documento con Enlace"]].to_markdown(index=False), unsafe_allow_html=True)else: 
                 st.warning("No se encontraron documentos para los criterios seleccionados.")
 
 elif modo_app == "Categorías":
@@ -1731,6 +1774,16 @@ elif modo_app == "Categorías":
             if dfs_comb:
                 f_df = pd.concat(dfs_comb, ignore_index=True)
                 
+                # 👇 AGREGAR AQUÍ EL CÓDIGO DE DEPURACIÓN
+                print("🔍 DEPURACIÓN - Columnas del DataFrame:", f_df.columns.tolist())
+                print("🔍 DEPURACIÓN - Primeras 2 filas:")
+                # Nota: 'Title' puede no existir aún, usa el nombre original
+                columnas_existentes = [col for col in ['Tipo de Documento', 'Organismo', 'Title', 'Link'] if col in f_df.columns]
+                if columnas_existentes:
+                    print(f_df[columnas_existentes].head(2).to_string())
+                print("🔍 DEPURACIÓN - Tipo de datos:", f_df.dtypes)
+                # 👆 FIN DEL CÓDIGO DE DEPURACIÓN
+
                 # ADAPTAMOS LA ESTRUCTURA PARA QUE EL FORMATO SEA IDÉNTICO AL BOLETÍN
                 f_df['Categoría'] = tipo_doc
                 if tipo_doc == "Discursos":
@@ -1744,12 +1797,17 @@ elif modo_app == "Categorías":
                 st.success(f"Se encontraron **{len(f_df)}** documentos.")
                 word = generate_word(f_df, title=f"Explorador - {tipo_doc}")
                 st.download_button("📄 Descargar en Word", word, "Explorador.docx")
-                
+
+                # Crear copia para visualización
                 disp = f_df.copy()
-                disp["Nombre de Documento"] = disp.apply(lambda x: f"[{x['Nombre de Documento']}]({x['Link']})", axis=1)
-                
-                # Pantalla: mostramos u ocultamos la columna Organismo dependiendo del filtro
-                cols_pantalla = ["Tipo de Documento", "Organismo", "Nombre de Documento"] if organismo_seleccionado == "Todos" else ["Tipo de Documento", "Nombre de Documento"]
-                st.markdown(disp[cols_pantalla].to_markdown(index=False), unsafe_allow_html=True)
-            else: 
-                st.warning("No se encontraron documentos para las fechas seleccionadas.")
+
+                # Crear columna con enlaces en el título (formato markdown)
+                disp["Documento con Enlace"] = disp.apply(
+                    lambda x: f"[{x['Nombre de Documento']}]({x['Link']})", 
+                    axis=1
+                )
+                # Mostrar SOLO una tabla con el formato deseado
+                if organismo_seleccionado == "Todos":
+                    st.markdown(disp[["Tipo de Documento", "Organismo", "Documento con Enlace"]].to_markdown(index=False), unsafe_allow_html=True)
+                else:
+                    st.markdown(disp[["Tipo de Documento", "Documento con Enlace"]].to_markdown(index=False), unsafe_allow_html=True)
