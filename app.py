@@ -643,45 +643,128 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
 
     return df
 
-# ========== FUNCIÓN DE DEPURACIÓN PARA BID ==========
+# BID 
 @st.cache_data(show_spinner=False)
 def load_investigacion_bid(start_date_str, end_date_str):
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    import time
+    import requests
+    from bs4 import BeautifulSoup
+    import datetime
+    import re
+    import pandas as pd
     
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
+    try:
+        start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
+        end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+    except:
+        start_date = datetime.datetime(2000, 1, 1)
+        end_date = datetime.datetime.now()
     
-    url = "https://publications.iadb.org/es?f%5B0%5D=type%3A4633&f%5B1%5D=type%3ADocumentos%20de%20Trabajo"
-    print(f"🔍 Accediendo a: {url}")
+    rows = []
     
-    driver = webdriver.Chrome(options=chrome_options)
-    driver.get(url)
-    time.sleep(5)
+    # URL base de la serie de IDB Publications en RePEc
+    base_url = "https://ideas.repec.org/s/idb/brikps.html"
     
-    # Guardar el HTML completo
-    with open("bid_debug_full.html", "w", encoding="utf-8") as f:
-        f.write(driver.page_source)
-    print("✅ HTML guardado como 'bid_debug_full.html'")
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
     
-    # Buscar cualquier elemento con 'views-row'
-    elementos = driver.find_elements(By.CSS_SELECTOR, "[class*='views-row']")
-    print(f"🔎 Elementos con 'views-row' en clase: {len(elementos)}")
+    meses_map = {
+        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+        'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12,
+    }
     
-    # Buscar específicamente el texto de fecha
-    page_text = driver.page_source
-    if "Feb 2026" in page_text:
-        print("✅ ¡'Feb 2026' ENCONTRADO en el HTML!")
-    else:
-        print("❌ 'Feb 2026' NO encontrado en el HTML")
+    try:
+        print("🔍 Extrayendo Working Papers del BID desde RePEc...")
+        
+        response = requests.get(base_url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"❌ Error HTTP {response.status_code}")
+            return pd.DataFrame()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Buscar TODOS los años (h3) y sus listas de papers
+        for year_header in soup.find_all('h3'):
+            year_text = year_header.get_text(strip=True)
+            # Verificar que sea un año (ej: "2025", "2024")
+            if not re.match(r'^\d{4}$', year_text):
+                continue
+            
+            year = int(year_text)
+            
+            # La lista de papers está en el div siguiente al h3
+            list_div = year_header.find_next('div', class_='panel-body')
+            if not list_div:
+                continue
+            
+            # Encontrar todos los items de la lista
+            papers = list_div.find_all('li', class_='list-group-item')
+            
+            for paper in papers:
+                try:
+                    # Extraer número de documento (opcional)
+                    doc_num = ""
+                    doc_num_match = re.search(r'<b>(\d+)', str(paper))
+                    if doc_num_match:
+                        doc_num = doc_num_match.group(1)
+                    
+                    # Extraer título y enlace
+                    a_tag = paper.find('a')
+                    if not a_tag:
+                        continue
+                    
+                    titulo = a_tag.get_text(strip=True)
+                    link = a_tag.get('href', '')
+                    if link and not link.startswith('http'):
+                        link = f"https://ideas.repec.org{link}"
+                    
+                    # Extraer autores
+                    autores = ""
+                    i_tag = paper.find('i')
+                    if i_tag:
+                        autores_raw = i_tag.get_text(strip=True).replace('by', '').strip()
+                        if autores_raw:
+                            autores = f" - {autores_raw}"
+                    
+                    # Crear fecha (primer día del año, pero podemos mejorarlo)
+                    # Los papers están ordenados por año, pero no tenemos mes específico
+                    fecha = datetime.datetime(year, 1, 1)
+                    
+                    # Filtrar por rango de años
+                    if fecha.year < start_date.year or fecha.year > end_date.year:
+                        continue
+                    
+                    # Si el año está dentro del rango, incluir todos los papers de ese año
+                    # (asumimos que son de ese año, aunque no sepamos el mes exacto)
+                    
+                    rows.append({
+                        "Date": fecha,
+                        "Title": f"{titulo}{autores}",
+                        "Link": link,
+                        "Organismo": "BID"
+                    })
+                    print(f"  ✅ {year}: {titulo[:50]}...")
+                    
+                except Exception as e:
+                    print(f"  ⚠️ Error procesando paper: {e}")
+                    continue
+        
+        print(f"\n✅ TOTAL Working Papers BID en RePEc: {len(rows)} documentos")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
     
-    driver.quit()
-    return pd.DataFrame()
-
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date", ascending=False)
+    
+    return df
+    
 # --- SECCIÓN: DISCURSOS ---
 @st.cache_data(show_spinner=False)
 def load_data_ecb(start_date_str, end_date_str):
@@ -1447,7 +1530,7 @@ if modo_app == "Boletín":
                     if org == "BPI": 
                         df = load_investigacion_bpi(sd, ed)
                     elif org == "BID":  # <-- NUEVO
-                        df = load_investigacion_bid(sd, ed)
+                         df = load_investigacion_bid_repec(sd, ed)  # Usar la nueva función
                 except Exception as e: 
                     print(f"Error en {org}: {e}")
                     continue
