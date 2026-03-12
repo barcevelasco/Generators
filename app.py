@@ -651,6 +651,7 @@ def load_investigacion_bid(start_date_str, end_date_str):
     import datetime
     import re
     import pandas as pd
+    import time
     
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
@@ -709,15 +710,15 @@ def load_investigacion_bid(start_date_str, end_date_str):
                     if doc_num_match:
                         doc_num = doc_num_match.group(1)
                     
-                    # Extraer título y enlace
+                    # Extraer título
                     a_tag = paper.find('a')
                     if not a_tag:
                         continue
                     
                     titulo = a_tag.get_text(strip=True)
-                    link = a_tag.get('href', '')
-                    if link and not link.startswith('http'):
-                        link = f"https://ideas.repec.org{link}"
+                    ideas_link = a_tag.get('href', '')
+                    if ideas_link and not ideas_link.startswith('http'):
+                        ideas_link = f"https://ideas.repec.org{ideas_link}"
                     
                     # Extraer autores
                     autores = ""
@@ -727,21 +728,66 @@ def load_investigacion_bid(start_date_str, end_date_str):
                         if autores_raw:
                             autores = f" - {autores_raw}"
                     
-                    # Crear fecha (primer día del año, pero podemos mejorarlo)
-                    # Los papers están ordenados por año, pero no tenemos mes específico
+                    # Crear fecha base
                     fecha = datetime.datetime(year, 1, 1)
                     
                     # Filtrar por rango de años
                     if fecha.year < start_date.year or fecha.year > end_date.year:
                         continue
                     
-                    # Si el año está dentro del rango, incluir todos los papers de ese año
-                    # (asumimos que son de ese año, aunque no sepamos el mes exacto)
+                    # ----- ENTRAR A LA PÁGINA INDIVIDUAL PARA EXTRAER EL DOI -----
+                    print(f"  🔍 Buscando DOI para: {titulo[:50]}...")
+                    
+                    # Pequeña pausa para no saturar el servidor
+                    time.sleep(0.5)
+                    
+                    try:
+                        paper_response = requests.get(ideas_link, headers=headers, timeout=10)
+                        if paper_response.status_code == 200:
+                            paper_soup = BeautifulSoup(paper_response.text, 'html.parser')
+                            
+                            # Buscar el DOI de varias formas:
+                            doi_final = None
+                            
+                            # 1. Buscar en meta tags
+                            # Primero intentar con name="DOI"
+                            meta_doi = paper_soup.find('meta', attrs={'name': 'DOI'})
+                            if meta_doi and meta_doi.get('content'):
+                                doi_final = meta_doi['content']
+                                print(f"    ✅ DOI encontrado en meta tag (name='DOI'): {doi_final}")
+                            
+                            # 2. Si no, intentar con name="citation_doi"
+                            if not doi_final:
+                                meta_doi = paper_soup.find('meta', attrs={'name': 'citation_doi'})
+                                if meta_doi and meta_doi.get('content'):
+                                    doi_final = meta_doi['content']
+                                    print(f"    ✅ DOI encontrado en meta tag (citation_doi): {doi_final}")
+
+                            # 2. Buscar enlace que contenga doi.org
+                            if not doi_final:
+                                for a in paper_soup.find_all('a', href=True):
+                                    href = a['href']
+                                    if 'doi.org' in href:
+                                        doi_final = href
+                                        print(f"    ✅ DOI encontrado en enlace: {doi_final}")
+                                        break
+                            
+                            # 3. Si no hay DOI, usar el enlace de IDEAS
+                            if not doi_final:
+                                doi_final = ideas_link
+                                print(f"    ⚠️ No se encontró DOI, usando enlace IDEAS")
+                        else:
+                            doi_final = ideas_link
+                            print(f"    ⚠️ Error al acceder a la página, usando enlace IDEAS")
+                            
+                    except Exception as e:
+                        doi_final = ideas_link
+                        print(f"    ⚠️ Error: {e}, usando enlace IDEAS")
                     
                     rows.append({
                         "Date": fecha,
                         "Title": f"{titulo}{autores}",
-                        "Link": link,
+                        "Link": doi_final,  # <-- AHORA ES EL DOI O ENLACE IDEAS
                         "Organismo": "BID"
                     })
                     print(f"  ✅ {year}: {titulo[:50]}...")
@@ -1530,7 +1576,7 @@ if modo_app == "Boletín":
                     if org == "BPI": 
                         df = load_investigacion_bpi(sd, ed)
                     elif org == "BID":  # <-- NUEVO
-                         df = load_investigacion_bid_repec(sd, ed)  # Usar la nueva función
+                         df = load_investigacion_bid(sd, ed)  # Usar la nueva función
                 except Exception as e: 
                     print(f"Error en {org}: {e}")
                     continue
