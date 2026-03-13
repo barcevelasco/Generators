@@ -763,18 +763,58 @@ def load_investigacion_bid(start_date_str, end_date_str):
             }
 
             for idx, item in enumerate(items):
-                # Intentar extraer título y enlace
+                # Intentar extraer título y enlace - VERSIÓN MEJORADA
                 title_elem = None
-                for selector in ['a', 'h2 a', 'h3 a', 'h4 a', '.title a']:
-                    title_elem = item.find('a', href=True) if selector == 'a' else item.select_one(selector)
-                    if title_elem:
-                        break
+                 # ESTRATEGIA 1: Buscar span.field-content > a (estructura específica del BID)
+                span_field = item.find('span', class_='field-content')
+                if span_field:
+                    a_tag = span_field.find('a')
+                    if a_tag and a_tag.get_text(strip=True):
+                        title_elem = a_tag
+                        print(f"  ✅ Título encontrado con estrategia 1")
+                
+                # ESTRATEGIA 2: Buscar enlaces con clases específicas de título
+                if not title_elem:
+                    for class_name in ['views-field-field-title', 'publication-title', 'title']:
+                        title_container = item.find('div', class_=lambda c: c and class_name in str(c))
+                        if title_container:
+                            a_tag = title_container.find('a')
+                            if a_tag and a_tag.get_text(strip=True):
+                                title_elem = a_tag
+                                print(f"  ✅ Título encontrado con estrategia 2: {class_name}")
+                                break
+                
+                # ESTRATEGIA 3: Buscar cualquier enlace que parezca un título (texto largo)
+                if not title_elem:
+                    for a_tag in item.find_all('a', href=True):
+                        texto = a_tag.get_text(strip=True)
+                        if len(texto) > 30 and 'publication' not in a_tag['href']:
+                            title_elem = a_tag
+                            print(f"  ✅ Título encontrado con estrategia 3")
+                            break
+                
+                # ESTRATEGIA 4: Fallback a los selectores originales
+                if not title_elem:
+                    for selector in ['a', 'h2 a', 'h3 a', 'h4 a', '.title a']:
+                        title_elem = item.find('a', href=True) if selector == 'a' else item.select_one(selector)
+                        if title_elem and title_elem.get_text(strip=True):
+                            print(f"  ✅ Título encontrado con estrategia 4: {selector}")
+                            break
 
                 if not title_elem:
+                    print(f"  ⚠️ Elemento {idx+1}: No se encontró título")
                     continue
 
                 titulo = title_elem.get_text(strip=True)
                 link = title_elem['href']
+                
+                # DEPURACIÓN: Ver qué se extrajo
+                print(f"  📌 Título: '{titulo[:100]}...'")
+                
+                if not titulo or len(titulo) < 10:
+                    print(f"  ⚠️ Título demasiado corto, se descarta")
+                    continue
+                    
                 if not link.startswith('http'):
                     link = "https://publications.iadb.org" + link
 
@@ -1666,7 +1706,8 @@ if modo_app == "Boletín":
                     lambda x: f"[{x['Nombre de Documento']}]({x['Link']})", 
                     axis=1
                 )
-                st.markdown(disp[["Tipo de Documento", "Organismo", "Documento con Enlace"]].to_markdown(index=False), unsafe_allow_html=True)else: 
+                st.markdown(disp[["Tipo de Documento", "Organismo", "Documento con Enlace"]].to_markdown(index=False), unsafe_allow_html=True)
+            else: 
                 st.warning("No se encontraron documentos para los criterios seleccionados.")
 
 elif modo_app == "Categorías":
@@ -1801,12 +1842,16 @@ elif modo_app == "Categorías":
                 # Crear copia para visualización
                 disp = f_df.copy()
 
-                # Crear columna con enlaces en el título (formato markdown)
+                 # 👇 VERIFICACIÓN RÁPIDA (la borraremos después)
+                st.write("Primer título:", disp['Nombre de Documento'].iloc[0] if len(disp) > 0 else "No hay datos")
+
+               # Crear columna con enlaces en el título
                 disp["Documento con Enlace"] = disp.apply(
                     lambda x: f"[{x['Nombre de Documento']}]({x['Link']})", 
                     axis=1
                 )
-                # Mostrar SOLO una tabla con el formato deseado
+                
+                # Mostrar tabla según el filtro
                 if organismo_seleccionado == "Todos":
                     st.markdown(disp[["Tipo de Documento", "Organismo", "Documento con Enlace"]].to_markdown(index=False), unsafe_allow_html=True)
                 else:
