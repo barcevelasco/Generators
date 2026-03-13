@@ -846,7 +846,226 @@ def load_investigacion_bid_en(start_date_str, end_date_str):
         print("\n⚠️ No se encontraron documentos del BID (EN)")
 
     return df
+
+# BID (Annual Reports en inglés)
+@st.cache_data(show_spinner=False)
+def load_reportes_bid_en(start_date_str, end_date_str):
+    """
+    Extrae Annual Reports del BID en inglés
+    URL: https://publications.iadb.org/en?f%5B0%5D=type%3AAnnual%20Reports
+    """
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from bs4 import BeautifulSoup
+    import datetime
+    import pandas as pd
+    import time
+    import re
+    from dateutil import parser
+
+    try:
+        start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
+        end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+        print(f"📅 Rango de fechas: {start_date.date()} a {end_date.date()}")
+    except:
+        start_date = datetime.datetime(2000, 1, 1)
+        end_date = datetime.datetime.now()
+        print(f"⚠️ Error en fechas, usando rango por defecto")
+
+    rows = []
     
+    # Configuración de paginación
+    page = 0
+    max_pages = 5  # Límite de páginas a extraer
+    hay_resultados = True
+    
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+
+    try:
+        print("🔍 Iniciando Selenium para BID Annual Reports (EN)...")
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        while page < max_pages and hay_resultados:
+            # URL para Annual Reports en inglés
+            url = f"https://publications.iadb.org/en?f%5B0%5D=type%3AAnnual%20Reports&page={page}"
+            
+            print(f"\n📄 Accediendo a página {page+1}: {url}")
+            driver.get(url)
+
+            try:
+                WebDriverWait(driver, 20).until_not(
+                    EC.title_contains("Just a moment")
+                )
+                print(f"✅ Página {page+1} cargada correctamente.")
+            except:
+                print(f"⚠️ La página {page+1} sigue mostrando 'Just a moment...', esperando...")
+                time.sleep(10)
+
+            time.sleep(5)
+            html = driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # Guardar HTML para depuración (solo primera página)
+            if page == 0:
+                with open("bid_reportes_debug.html", "w", encoding="utf-8") as f:
+                    f.write(html)
+                print("💾 HTML guardado en bid_reportes_debug.html")
+
+            # Estrategias de búsqueda
+            items = soup.find_all('div', class_='views-row')
+            print(f"📚 Página {page+1} - Elementos encontrados: {len(items)}")
+
+            if len(items) == 0:
+                print(f"📭 No hay más elementos en página {page+1}")
+                hay_resultados = False
+                break
+
+            # Mapeo de meses en inglés
+            meses_en = {
+                'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+            }
+
+            docs_en_pagina = 0
+            for idx, item in enumerate(items):
+                print(f"\n--- Procesando elemento {idx+1} ---")
+                
+                # ESTRATEGIA 1: Buscar específicamente el div con clase 'views-field-field-title'
+                title_elem = None
+                title_container = item.find('div', class_='views-field-field-title')
+                if title_container:
+                    span_field = title_container.find('span', class_='field-content')
+                    if span_field:
+                        a_tag = span_field.find('a')
+                        if a_tag:
+                            title_elem = a_tag
+                            print(f"  ✅ Título encontrado con estrategia 1")
+
+                # ESTRATEGIA 2: Buscar span.field-content > a (estructura genérica)
+                if not title_elem:
+                    span_field = item.find('span', class_='field-content')
+                    if span_field:
+                        a_tag = span_field.find('a')
+                        if a_tag:
+                            title_elem = a_tag
+                            print(f"  ✅ Título encontrado con estrategia 2")
+
+                # ESTRATEGIA 3: Buscar cualquier enlace con texto largo
+                if not title_elem:
+                    for a_tag in item.find_all('a', href=True):
+                        texto = a_tag.get_text(strip=True)
+                        if len(texto) > 30:
+                            title_elem = a_tag
+                            print(f"  ✅ Título encontrado con estrategia 3")
+                            break
+
+                if not title_elem:
+                    print(f"  ⚠️ No se encontró título en elemento")
+                    continue
+
+                titulo = title_elem.get_text(strip=True)
+                link = title_elem['href']
+                if not link.startswith('http'):
+                    link = "https://publications.iadb.org" + link
+
+                print(f"  📌 Título extraído: '{titulo[:100]}...'")
+
+                # Extraer fecha - VERSIÓN MEJORADA
+                parsed_date = None
+                
+                # Buscar específicamente el contenedor de fecha
+                date_container = item.find('div', class_='views-field-field-date-issued-text')
+                if date_container:
+                    date_span = date_container.find('span', class_='field-content')
+                    if date_span:
+                        date_text = date_span.get_text(strip=True)
+                        print(f"  📅 Texto de fecha (específico): {date_text}")
+                        
+                        # Intentar parsear con regex (ej: "Mar 2026")
+                        match = re.search(r'([A-Za-z]{3,9})\s+(\d{4})', date_text)
+                        if match:
+                            mes_str, año_str = match.groups()
+                            mes_num = meses_en.get(mes_str.lower()[:3])
+                            if mes_num:
+                                parsed_date = datetime.datetime(int(año_str), mes_num, 1)
+                                print(f"  ✅ Fecha parseada: {parsed_date}")
+                
+                # Fallback: buscar cualquier span con texto de fecha
+                if not parsed_date:
+                    for span in item.find_all('span'):
+                        text = span.get_text(strip=True)
+                        match = re.search(r'([A-Za-z]{3,9})\s+(\d{4})', text)
+                        if match:
+                            mes_str, año_str = match.groups()
+                            mes_num = meses_en.get(mes_str.lower()[:3])
+                            if mes_num:
+                                parsed_date = datetime.datetime(int(año_str), mes_num, 1)
+                                print(f"  ✅ Fecha parseada (fallback): {parsed_date}")
+                                break
+
+                if not parsed_date:
+                    print(f"  ⚠️ No se pudo extraer fecha")
+                    continue
+
+                print(f"  📅 Fecha final: {parsed_date.date()}")
+
+                # Filtrar por fecha
+                if parsed_date < start_date or parsed_date > end_date:
+                    print(f"  ⏭️ Fecha fuera de rango: {parsed_date.date()} (rango: {start_date.date()} a {end_date.date()})")
+                    continue
+
+                # Evitar duplicados
+                if not any(r['Link'] == link for r in rows):
+                    rows.append({
+                        "Date": parsed_date,
+                        "Title": titulo,
+                        "Link": link,
+                        "Organismo": "BID (Reportes)"
+                    })
+                    docs_en_pagina += 1
+                    print(f"  ✅ Documento AGREGADO: {titulo[:50]}...")
+
+            print(f"\n📊 Documentos agregados en esta página: {docs_en_pagina}")
+            print(f"📊 Total documentos hasta ahora: {len(rows)}")
+
+            page += 1
+            print(f"➡️ Avanzando a página {page+1}...\n")
+
+        driver.quit()
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.drop_duplicates(subset=['Link'])
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date", ascending=False)
+        print(f"\n✅ Documentos BID (Reportes) encontrados en {page} páginas: {len(df)}")
+        print("\n📋 Primeros documentos:")
+        for i, row in df.head(3).iterrows():
+            print(f"  - {row['Date'].strftime('%Y-%m')}: {row['Title'][:80]}...")
+    else:
+        print("\n⚠️ No se encontraron documentos del BID (Reportes)")
+
+    return df
+
+
 # --- SECCIÓN: DISCURSOS ---
 @st.cache_data(show_spinner=False)
 def load_data_ecb(start_date_str, end_date_str):
@@ -1465,7 +1684,7 @@ mapeo_discursos = {
 
 # --- LISTAS DINÁMICAS DE ORGANISMOS ---
 orgs_discursos = ["BBk (Alemania)", "BdF (Francia)", "BM", "BoC (Canadá)", "BoJ (Japón)", "BPI", "CEF", "ECB (Europa)", "Fed (Estados Unidos)", "PBoC (China)"]
-orgs_reportes = ["BID", "OCDE", "CEF", "BPI"]
+orgs_reportes = ["BID", "OCDE", "CEF", "BPI",  "BID (Reportes)"]
 orgs_pub_inst = ["BPI", "CEF", "FMI", "BM", "CEMLA"]  # AÑADIDO FMI Y BM - LUEGO CEMLA (Marzo 9-2026)
 orgs_investigacion = ["BPI", "BID", "BID (Inglés)"]  # AÑADIDO BID en inglés
 
@@ -1477,6 +1696,7 @@ mapeo_organismos = {
     "FMI": "Fondo Monetario Internacional",
     "BID": "Banco Interamericano de Desarrollo",
     "BID (Inglés)": "BID - Working Papers (Inglés)",  # <-- NUEVA LÍNEA
+    "BID (Reportes)": "BID - Annual Reports (Inglés)",
     "OCDE": "OCDE",
     "BBk (Alemania)": "Bundesbank",
     "BdF (Francia)": "Banque de France",
@@ -1540,16 +1760,24 @@ if modo_app == "Boletín":
                 paso_actual += 1; prog.progress(paso_actual / total_pasos)
 
             # 2. BARRIDO DE REPORTES
+                        # 2. BARRIDO DE REPORTES
             for org in orgs_reportes:
                 txt.text(f"Procesando Reportes: {org}...")
                 df = pd.DataFrame()
                 try:
-                    if org == "BID": df = load_reportes_bid(sd, ed)
-                    elif org == "OCDE": df = load_reportes_ocde(sd, ed)
-                    elif org == "CEF": df = load_reportes_cef(sd, ed)
-                    elif org == "BPI": df = load_reportes_bpi(sd, ed)
-                except Exception as e: pass 
-                
+                    if org == "BID": 
+                        df = load_reportes_bid(sd, ed)
+                    elif org == "BID (Reportes)":  # <-- NUEVO
+                        df = load_reportes_bid_en(sd, ed)  # <-- NUEVO
+                    elif org == "OCDE": 
+                        df = load_reportes_ocde(sd, ed)
+                    elif org == "CEF": 
+                        df = load_reportes_cef(sd, ed)
+                    elif org == "BPI": 
+                        df = load_reportes_bpi(sd, ed)
+                except Exception as e: 
+                    print(f"Error en {org}: {e}")
+ 
                 if not df.empty:
                     df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
                     df_f = df[(df["Date"].dt.year.isin(a_num)) & (df["Date"].dt.month.isin(m_num))].copy()
@@ -1732,6 +1960,8 @@ elif modo_app == "Categorías":
                     
                     elif tipo_doc == "Reportes":
                         if o == "BID": df = load_reportes_bid(sd, ed)
+                        elif o == "BID (Reportes)":  # <-- NUEVO
+                            df = load_reportes_bid_en(sd, ed)  # <-- NUEVO
                         elif o == "OCDE": df = load_reportes_ocde(sd, ed)
                         elif o == "CEF": df = load_reportes_cef(sd, ed)
                         elif o == "BPI": df = load_reportes_bpi(sd, ed) 
