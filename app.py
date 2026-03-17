@@ -642,7 +642,9 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
         print("⚠️ No se encontraron novedades")
 
     return df
- 
+
+# --- SECCIÓN: INVESTIGACIÓN ---
+
 # BID (Working Papers en inglés)
 @st.cache_data(show_spinner=False)
 def load_investigacion_bid_en(start_date_str, end_date_str):
@@ -1065,6 +1067,228 @@ def load_reportes_bid_en(start_date_str, end_date_str):
 
     return df
 
+# ===== NUEVA FUNCIÓN PARA CEMLA =====
+@st.cache_data(show_spinner=False)
+def load_investigacion_cemla(start_date_str, end_date_str):
+    """
+    Extrae artículos del Latin American Journal of Central Banking (CEMLA)
+    desde ScienceDirect (Articles in Press)
+    URL: https://www.sciencedirect.com/journal/latin-american-journal-of-central-banking/articles-in-press
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    import datetime
+    import pandas as pd
+    import re
+    from dateutil import parser
+    import time
+
+    url = "https://www.sciencedirect.com/journal/latin-american-journal-of-central-banking/articles-in-press"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
+        end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+        print(f"📅 Rango de fechas CEMLA: {start_date.date()} a {end_date.date()}")
+    except:
+        start_date = datetime.datetime(2000, 1, 1)
+        end_date = datetime.datetime.now()
+        print(f"⚠️ Error en fechas CEMLA, usando rango por defecto")
+
+    rows = []
+    page = 1
+    max_pages = 5  # Límite para no sobrecargar
+    hay_resultados = True
+    
+    meses_en = {
+        'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+        'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+    }
+
+    print("🔍 Iniciando extracción de CEMLA (Latin American Journal of Central Banking)...")
+    
+    while page <= max_pages and hay_resultados:
+        # Construir URL con paginación
+        if page == 1:
+            current_url = url
+        else:
+            current_url = f"{url}?page={page}"
+        
+        print(f"📄 Procesando página {page}: {current_url}")
+        
+        try:
+            # Hacer la petición
+            res = requests.get(current_url, headers=headers, timeout=20)
+            if res.status_code != 200:
+                print(f"⚠️ Error {res.status_code} en página {page}")
+                break
+                
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # Guardar HTML de depuración (solo primera página)
+            if page == 1:
+                with open("cemla_debug.html", "w", encoding="utf-8") as f:
+                    f.write(res.text)
+                print("💾 HTML guardado en cemla_debug.html")
+            
+            # Buscar artículos - En ScienceDirect están en <li> con clase 'js-article-list-item'
+            articulos = soup.find_all('li', class_='js-article-list-item')
+            print(f"📚 Página {page} - Artículos encontrados: {len(articulos)}")
+            
+            if len(articulos) == 0:
+                print(f"📭 No hay más artículos en página {page}")
+                hay_resultados = False
+                break
+            
+            docs_en_pagina = 0
+            for idx, articulo in enumerate(articulos):
+                print(f"\n--- Procesando artículo {idx+1} ---")
+                
+                # 1. EXTRAER TÍTULO Y ENLACE
+                title_elem = articulo.find('a', class_='article-content-title')
+                if not title_elem:
+                    # Fallback: buscar cualquier enlace con título largo
+                    title_elem = articulo.find('a', href=True)
+                    if title_elem and len(title_elem.get_text(strip=True)) < 10:
+                        print(f"  ⚠️ Título muy corto, ignorando")
+                        continue
+                
+                if not title_elem:
+                    print(f"  ⚠️ No se encontró título")
+                    continue
+                
+                titulo = title_elem.get_text(strip=True)
+                link = title_elem.get('href', '')
+                if not link.startswith('http'):
+                    link = f"https://www.sciencedirect.com{link}"
+                
+                print(f"  📌 Título: {titulo[:80]}...")
+                
+                # 2. EXTRAER FECHA - BUSCAR "Available online"
+                # Buscar el texto de fecha específico
+                fecha_texto = None
+                
+                # Estrategia 1: Buscar span con clase específica para fecha
+                fecha_span = articulo.find('span', class_='js-article-item-aip-date')
+                if fecha_span:
+                    fecha_texto = fecha_span.get_text(strip=True)
+                    print(f"  📅 Texto fecha (span): {fecha_texto}")
+                
+                # Estrategia 2: Buscar cualquier elemento que contenga "Available online"
+                if not fecha_texto:
+                    for elem in articulo.find_all(['span', 'div', 'p']):
+                        texto = elem.get_text(strip=True)
+                        if 'Available online' in texto:
+                            fecha_texto = texto
+                            print(f"  📅 Texto fecha (disponible): {fecha_texto}")
+                            break
+                
+                if not fecha_texto:
+                    print(f"  ⚠️ No se encontró fecha")
+                    continue
+                
+                # Extraer la fecha del texto "Available online 14 March 2026"
+                fecha_match = re.search(r'Available online\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})', fecha_texto)
+                if not fecha_match:
+                    # Intentar con formato alternativo
+                    fecha_match = re.search(r'(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})', fecha_texto)
+                
+                parsed_date = None
+                if fecha_match:
+                    dia = int(fecha_match.group(1))
+                    mes_str = fecha_match.group(2).lower()
+                    año = int(fecha_match.group(3))
+                    
+                    # Buscar el número del mes
+                    mes_num = None
+                    for key, value in meses_en.items():
+                        if key in mes_str or mes_str in key:
+                            mes_num = value
+                            break
+                    
+                    if mes_num:
+                        parsed_date = datetime.datetime(año, mes_num, dia)
+                        print(f"  ✅ Fecha parseada: {parsed_date.date()}")
+                    else:
+                        print(f"  ⚠️ No se pudo determinar el mes: {mes_str}")
+                else:
+                    print(f"  ⚠️ No se pudo extraer fecha del texto: {fecha_texto}")
+                    continue
+                
+                # Filtrar por fecha
+                if parsed_date < start_date or parsed_date > end_date:
+                    print(f"  ⏭️ Fecha fuera de rango: {parsed_date.date()}")
+                    continue
+                
+                # 3. EXTRAER AUTORES
+                autor = ""
+                autor_elem = articulo.find('div', class_='js-article-author-list')
+                if autor_elem:
+                    autor_text = autor_elem.get_text(strip=True)
+                    if autor_text and len(autor_text) < 200:
+                        autor = autor_text
+                        print(f"  👤 Autor: {autor[:50]}...")
+                
+                # 4. EXTRAER TIPO DE DOCUMENTO
+                tipo = ""
+                tipo_elem = articulo.find('span', class_='js-article-subtype')
+                if tipo_elem:
+                    tipo = tipo_elem.get_text(strip=True)
+                    print(f"  📋 Tipo: {tipo}")
+                
+                # Construir título final con autor si está disponible
+                titulo_final = titulo
+                if autor and autor not in titulo:
+                    titulo_final = f"{autor}: {titulo}"
+                
+                # Evitar duplicados
+                if not any(r['Link'] == link for r in rows):
+                    rows.append({
+                        "Date": parsed_date,
+                        "Title": titulo_final,
+                        "Link": link,
+                        "Organismo": "CEMLA",
+                        "Tipo": tipo if tipo else "Research article"
+                    })
+                    docs_en_pagina += 1
+                    print(f"  ✅ Artículo AGREGADO")
+            
+            print(f"\n📊 Artículos agregados en página {page}: {docs_en_pagina}")
+            print(f"📊 Total artículos hasta ahora: {len(rows)}")
+            
+            # Si no encontramos artículos en esta página o los últimos son muy viejos, paramos
+            if docs_en_pagina == 0:
+                print(f"📭 No se agregaron artículos en página {page}")
+                # Si es la primera página y no hay nada, paramos
+                if page == 1:
+                    break
+            
+            page += 1
+            time.sleep(1)  # Pausa entre páginas
+            
+        except Exception as e:
+            print(f"❌ Error en página {page}: {e}")
+            import traceback
+            traceback.print_exc()
+            break
+    
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.drop_duplicates(subset=['Link'])
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date", ascending=False)
+        print(f"\n✅ TOTAL: {len(df)} artículos de CEMLA extraídos")
+        print("\n📋 Primeros artículos:")
+        for i, row in df.head(3).iterrows():
+            print(f"  - {row['Date'].strftime('%d/%m/%Y')}: {row['Title'][:80]}...")
+    else:
+        print("\n⚠️ No se encontraron artículos de CEMLA")
+    
+    return df
 
 # --- SECCIÓN: DISCURSOS ---
 @st.cache_data(show_spinner=False)
@@ -1686,7 +1910,7 @@ mapeo_discursos = {
 orgs_discursos = ["BBk (Alemania)", "BdF (Francia)", "BM", "BoC (Canadá)", "BoJ (Japón)", "BPI", "CEF", "ECB (Europa)", "Fed (Estados Unidos)", "PBoC (China)"]
 orgs_reportes = ["BID", "OCDE", "CEF", "BPI",  "BID (Reportes)"]
 orgs_pub_inst = ["BPI", "CEF", "FMI", "BM", "CEMLA"]  # AÑADIDO FMI Y BM - LUEGO CEMLA (Marzo 9-2026)
-orgs_investigacion = ["BPI", "BID", "BID (Inglés)"]  # AÑADIDO BID en inglés
+orgs_investigacion = ["BPI", "BID", "BID (Inglés)", "CEMLA"]  # AÑADIDO CEMLA
 
 # Mapeo de nombres para mostrar
 mapeo_organismos = {
@@ -1844,6 +2068,8 @@ if modo_app == "Boletín":
                         df = load_investigacion_bid(sd, ed)  # Español
                     elif org == "BID (Inglés)":  # <-- NUEVO
                         df = load_investigacion_bid_en(sd, ed)  # Inglés
+                    elif org == "CEMLA":  # <-- AÑADIR ESTA LÍNEA
+                        df = load_investigacion_cemla(sd, ed)  # <-- AÑADIR ESTA LÍNEA
                 except Exception as e: 
                     print(f"Error en {org}: {e}")
                     continue
@@ -1973,6 +2199,8 @@ elif modo_app == "Categorías":
                             df = load_investigacion_bid(sd, ed)  # Español
                         elif o == "BID (Inglés)":  # <-- NUEVO
                             df = load_investigacion_bid_en(sd, ed)  # Inglés
+                        elif o == "CEMLA":  # <-- AÑADIR ESTAS LÍNEAS
+                            df = load_investigacion_cemla(sd, ed)  # <-- AÑADIR ESTAS LÍNEAS
 
                     elif tipo_doc == "Publicaciones Institucionales":
                         if o == "BPI": 
