@@ -9,6 +9,8 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
+# Importar nuestro módulo personalizado
+from extractores.cemla_extractor import extraer_articulos_cemla
 from bs4 import BeautifulSoup
 import calendar
 import time
@@ -2069,7 +2071,7 @@ if modo_app == "Boletín":
                     elif org == "BID (Inglés)":  # <-- NUEVO
                         df = load_investigacion_bid_en(sd, ed)  # Inglés
                     elif org == "CEMLA":  # <-- AÑADIR ESTA LÍNEA
-                        df = load_investigacion_cemla(sd, ed)  # <-- AÑADIR ESTA LÍNEA
+                        df = extraer_articulos_cemla(sd, ed)  # <-- NUEVA LÍNEA
                 except Exception as e: 
                     print(f"Error en {org}: {e}")
                     continue
