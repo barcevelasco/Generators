@@ -1116,7 +1116,7 @@ def load_pub_inst_imf(start_date_str, end_date_str):
 # ========== FUNCIÓN PARA CEMLA (PUBLICACIONES INSTITUCIONALES) ==========
 @st.cache_data(show_spinner=False)
 def load_pub_inst_cemla(start_date_str, end_date_str):
-    """Extractor para Boletín CEMLA"""
+    """Extractor para Boletín CEMLA - Versión optimizada para la estructura de Mailchimp"""
     import requests
     from bs4 import BeautifulSoup
     import datetime
@@ -1127,16 +1127,40 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
     url = "https://www.cemla.org/comunicados.html"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
+    print("="*50)
     print("🔍 Iniciando extracción de CEMLA con novedades individuales...")
+    print(f"📅 Rango solicitado: {start_date_str} a {end_date_str}")
+    print("="*50)
 
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
         end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
-    except:
+        print(f"✅ Fechas parseadas: {start_date.date()} a {end_date.date()}")
+    except Exception as e:
+        print(f"⚠️ Error parseando fechas: {e}")
         start_date = datetime.datetime(2000, 1, 1)
         end_date = datetime.datetime.now() + datetime.timedelta(days=365)
+        print(f"📅 Usando rango por defecto: {start_date.date()} a {end_date.date()}")
 
     rows = []
+
+    # Palabras y URLs a excluir
+    palabras_excluir = [
+        'convocatoria', 'premio', 'curso', 'taller', 'seminario',
+        'evento', 'webinar', 'congreso', 'beca', 'inscripción',
+        'registro', 'participación', 'invitación', 'calendario',
+        'programa de actividades', 'agenda', 'convocan', 'postulación',
+        'reunión de gobernadores', 'reunión de responsables', 'encuesta',
+        'award', 'prize', 'conference', 'workshop', 'registration',
+        'call for papers', 'agenda', 'calendar', 'program', 'invitation',
+        'survey', 'meeting', 'governors', 'responsables'
+    ]
+    urls_excluir = [
+        'calendario', 'premiodebancacentral', 'convocatoria',
+        'award', 'prize', 'course', 'workshop', 'event',
+        'reunion', 'meeting', 'programa-actividades'
+    ]
+
     meses_map = {
         'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
         'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
@@ -1144,12 +1168,20 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
     }
 
     try:
-        print(f"📡 Solicitando lista de boletines...")
+        print(f"📡 Solicitando lista de boletines desde {url}...")
         res = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
+        print(f"   Status code: {res.status_code}")
+        
+        if res.status_code != 200:
+            print(f"   ❌ Error al acceder a la página")
+            return pd.DataFrame()
 
+        soup = BeautifulSoup(res.text, 'html.parser')
+        print(f"✅ Página cargada, {len(soup.text)} caracteres")
+
+        # ===== 1. EXTRAER LISTA DE BOLETINES =====
         boletines = []
-        for element in soup.find_all(['p', 'div', 'h3', 'h4']):
+        for element in soup.find_all(['p', 'div', 'h3', 'h4', 'li']):
             text = element.get_text(strip=True)
             match = re.match(r'^([A-Za-z]+)\s+(\d{4})', text)
             if not match:
@@ -1158,11 +1190,13 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
             mes_str, year_str = match.groups()
             mes_num = meses_map.get(mes_str.lower())
             if not mes_num:
+                print(f"   ⚠️ Mes no reconocido: {mes_str}")
                 continue
 
             try:
                 fecha = datetime.datetime(int(year_str), mes_num, 1)
-            except:
+            except Exception as e:
+                print(f"   ⚠️ Error fecha: {e}")
                 continue
 
             a_tag = element.find('a', href=True, string=re.compile(r'Ver más', re.I))
@@ -1186,12 +1220,21 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
                         'titulo': text,
                         'link': link
                     })
-                    print(f"📌 Boletín encontrado: {fecha.strftime('%Y-%m')}")
+                    print(f"📌 Boletín encontrado: {fecha.strftime('%Y-%m')} - {text[:50]}...")
 
         print(f"✅ Total boletines principales: {len(boletines)}")
 
+        if not boletines:
+            print("⚠️ No se encontraron boletines. Verifica la estructura de la página.")
+            with open("cemla_debug.html", "w", encoding="utf-8") as f:
+                f.write(res.text)
+            print("💾 HTML guardado en cemla_debug.html para depuración")
+            return pd.DataFrame()
+
+        # ===== 2. PROCESAR CADA BOLETÍN =====
         for boletin in boletines:
             if boletin['fecha'] < start_date or boletin['fecha'] > end_date:
+                print(f"⏭️ Boletín fuera de rango: {boletin['fecha'].strftime('%Y-%m')}")
                 continue
 
             print(f"\n🔍 Procesando boletín {boletin['fecha'].strftime('%Y-%m')}: {boletin['link']}")
@@ -1208,49 +1251,97 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
                 
                 novedades = []
                 
-                for a in soup_boletin.find_all('a', href=True):
-                    href = a.get('href', '')
-                    text = a.get_text(strip=True)
-                    
-                    if any(term in href.lower() for term in ['cemla.org', '.pdf', 'premiodebancacentral', 'foroderemesas']):
-                        if len(text) > 10:
-                            desc = ""
-                            parent = a.find_parent(['p', 'div', 'td'])
-                            if parent:
-                                desc = parent.get_text(strip=True).replace(text, '').strip()
-                                if len(desc) > 200:
-                                    desc = desc[:200] + "..."
+                # ===== ESTRATEGIA MEJORADA: Buscar bloques de novedades =====
+                # Busca divs con clase "ipost clearfix" o similar (estructura de Mailchimp)
+                bloques = soup_boletin.find_all('div', class_=lambda c: c and 'ipost' in c.split())
+                
+                if not bloques:
+                    # Fallback: buscar cualquier div que contenga un h3 y un enlace
+                    bloques = soup_boletin.find_all('div', class_=lambda c: c and ('entry' in c or 'post' in c))
+                
+                print(f"   Bloques de novedades encontrados: {len(bloques)}")
+                
+                for bloque in bloques:
+                    try:
+                        # 1. Extraer título del bloque (desde h3)
+                        title_elem = bloque.find('h3')
+                        if not title_elem:
+                            title_elem = bloque.find(['h1', 'h2', 'h4'])
+                        
+                        if not title_elem:
+                            continue
+                        
+                        titulo = title_elem.get_text(strip=True)
+                        if not titulo or len(titulo) < 10:
+                            continue
+                        
+                        # 2. Buscar enlace relevante dentro del bloque
+                        link_final = None
+                        enlaces = bloque.find_all('a', href=True)
+                        
+                        for a in enlaces:
+                            href = a.get('href', '').strip()
+                            if not href:
+                                continue
                             
-                            titulo_completo = f"{boletin['titulo']} - {text}"
-                            if desc:
-                                titulo_completo += f": {desc}"
+                            # Excluir enlaces de redes sociales, suscripción, etc.
+                            if any(x in href.lower() for x in ['twitter', 'facebook', 'mailchi.mp', 'unsubscribe', 'share', 'forward']):
+                                continue
                             
-                            novedades.append({
-                                'Date': boletin['fecha'],
-                                'Title': titulo_completo,
-                                'Link': href if href.startswith('http') else f"https://www.cemla.org/{href}",
-                                'Organismo': "CEMLA"
-                            })
-                            print(f"  ✅ Novedad: {text[:50]}...")
+                            # Construir URL absoluta
+                            if href.startswith('/'):
+                                href_full = f"https://www.cemla.org{href}"
+                            elif href.startswith('http'):
+                                href_full = href
+                            else:
+                                href_full = f"https://www.cemla.org/{href}"
+                            
+                            # Priorizar PDFs o enlaces que no sean "Leer más"
+                            if href_full.endswith('.pdf') or not re.search(r'leer\s*más', a.get_text(strip=True), re.I):
+                                link_final = href_full
+                                break
+                            else:
+                                if not link_final:
+                                    link_final = href_full
+                        
+                        if not link_final:
+                            continue
+                        
+                        # 3. Limpiar título
+                        titulo = re.sub(r'\s+', ' ', titulo).strip()
+                        if len(titulo) > 150:
+                            titulo = titulo[:150] + "..."
+                        
+                        # 4. Verificar exclusión
+                        texto_lower = titulo.lower()
+                        url_lower = link_final.lower()
+                        
+                        es_excluido_titulo = any(p in texto_lower for p in palabras_excluir)
+                        es_excluido_url = any(p in url_lower for p in urls_excluir)
+                        
+                        if es_excluido_titulo or es_excluido_url:
+                            print(f"  ⏭️ Excluido: {titulo[:50]}...")
+                            continue
+                        
+                        # 5. Agregar a novedades
+                        novedades.append({
+                            'Date': boletin['fecha'],
+                            'Title': titulo,
+                            'Link': link_final,
+                            'Organismo': "CEMLA"
+                        })
+                        print(f"  ✅ {titulo[:60]}...")
+                        
+                    except Exception as e:
+                        print(f"    ❌ Error procesando bloque: {e}")
+                        continue
                 
                 if not novedades:
-                    for elem in soup_boletin.find_all(['a', 'span', 'div'], string=re.compile(r'Leer más', re.I)):
-                        a_tag = elem.find_parent('a') if elem.name != 'a' else elem
-                        if a_tag and a_tag.get('href'):
-                            href = a_tag['href']
-                            prev = a_tag.find_previous(['h1', 'h2', 'h3', 'h4', 'p', 'strong'])
-                            titulo = prev.get_text(strip=True) if prev else "Novedad CEMLA"
-                            
-                            if len(titulo) > 200:
-                                titulo = titulo[:200] + "..."
-                            
-                            novedades.append({
-                                'Date': boletin['fecha'],
-                                'Title': f"{boletin['titulo']} - {titulo}",
-                                'Link': href if href.startswith('http') else f"https://www.cemla.org/{href}",
-                                'Organismo': "CEMLA"
-                            })
-                            print(f"  ✅ Novedad (Leer más): {titulo[:50]}...")
+                    print("  ⚠️ No se encontraron enlaces relevantes. Primeros 5 enlaces del boletín:")
+                    for i, a in enumerate(soup_boletin.find_all('a', href=True)[:5]):
+                        href = a.get('href', '')
+                        texto = a.get_text(strip=True) or "SIN TEXTO"
+                        print(f"     {i+1}. Texto: '{texto[:60]}' -> URL: {href[:80]}")
                 
                 rows.extend(novedades)
                 print(f"  📊 Total novedades en este boletín: {len(novedades)}")
@@ -1270,8 +1361,6 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
         df["Date"] = pd.to_datetime(df["Date"])
         
         print(f"\n🔍 Eliminando duplicados...")
-        print(f"   Antes: {len(df)} registros")
-        
         df = df.drop_duplicates(subset=['Date', 'Link'], keep='first')
         
         enlaces_a_excluir = [
@@ -1279,13 +1368,17 @@ def load_pub_inst_cemla(start_date_str, end_date_str):
             'mailchi.mp/cemla.org/boletin',
             'e=UNIQID'
         ]
-        
         for excluir in enlaces_a_excluir:
             df = df[~df['Link'].str.contains(excluir, na=False)]
         
         print(f"   Después: {len(df)} registros")
-        
         df = df.sort_values("Date", ascending=False)
+
+        print(f"\n✅ TOTAL CEMLA PUBLICACIONES: {len(df)} documentos")
+        if not df.empty:
+            print("📋 PRIMEROS 3 DOCUMENTOS:")
+            for i, row in df.head(3).iterrows():
+                print(f"   - {row['Date'].strftime('%Y-%m-%d')}: {row['Title'][:60]}...")
     else:
         print("⚠️ No se encontraron novedades")
 
@@ -2802,21 +2895,80 @@ elif modo_app == "Categorías":
                         use_container_width=True
                     )
                     
-                    # Mostrar resultados
+                    # ========== MOSTRAR RESULTADOS EN TABLA CON HIPERVÍNCULOS ==========
+                    # Agregar la columna "Tipo de Documento"
+                    f_df["Tipo de Documento"] = tipo_doc
+                    
+                    # Construir tabla HTML con enlaces clickeables
+                    table_html = """
+                    <style>
+                    .result-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-family: 'Calibri', sans-serif;
+                    }
+                    .result-table th {
+                        background-color: #00205B;
+                        color: white;
+                        padding: 12px;
+                        text-align: left;
+                        font-weight: bold;
+                        border: 1px solid #ddd;
+                    }
+                    .result-table td {
+                        padding: 10px;
+                        border: 1px solid #ddd;
+                        vertical-align: top;
+                    }
+                    .result-table tr:nth-child(even) {
+                        background-color: #f9f9f9;
+                    }
+                    .result-table a {
+                        color: #00205B;
+                        text-decoration: none;
+                    }
+                    .result-table a:hover {
+                        text-decoration: underline;
+                    }
+                    </style>
+                    <table class="result-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Organismo</th>
+                                <th>Nombre de Documento</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                    """
+                    
                     for _, row in f_df.iterrows():
-                        with st.container():
-                            st.markdown(f"### 📄 {row['Título']}")
-                            cols = st.columns([1, 1, 2])
-                            with cols[0]:
-                                st.markdown(f"📅 **{row['Fecha'].strftime('%d/%m/%Y')}**")
-                            with cols[1]:
-                                st.markdown(f"🏛️ **{row['Organismo']}**")
-                            with cols[2]:
-                                st.markdown(f"🔗 [Ver documento en línea]({row['Link']})")
-                            st.markdown("---")
+                        fecha_str = row['Fecha'].strftime('%d/%m/%Y')
+                        organismo = row.get('Organismo', '')
+                        titulo = row['Título']
+                        link = row['Link']
+                        
+                        table_html += f"""
+                        <tr>
+                            <td>{fecha_str}</td>
+                            <td>{organismo}</td>
+                            <td><a href="{link}" target="_blank">{titulo}</a></td>
+                        </tr>
+                        """
+                    
+                    table_html += """
+                        </tbody>
+                    </table>
+                    """
+                    # Renderizar la tabla (solo UNA vez)
+                    try:
+                        st.html(table_html)
+                    except AttributeError:
+                        # Fallback para versiones anteriores de Streamlit
+                        st.components.v1.html(table_html, height=400, scrolling=True)
+                    
                 else:
                     st.warning("😕 No se encontraron documentos para los criterios seleccionados.")
-
 # ==========================================
 # PIE DE PÁGINA
 # ==========================================
