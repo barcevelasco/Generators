@@ -1670,41 +1670,102 @@ def load_investigacion_bid_en_fallback(start_date, end_date):
     return df
 
 
-# ===== VERSIÓN SIMPLIFICADA DE CEMLA (INVESTIGACIÓN) =====
+# ===== VERSIÓN ACTUALIZADA DE CEMLA (INVESTIGACIÓN) CON RSS =====
 @st.cache_data(show_spinner=False)
 def load_investigacion_cemla(start_date_str, end_date_str):
-    """Versión simplificada de CEMLA con datos de ejemplo"""
+    """Extrae artículos de investigación del CEMLA desde RSS de ScienceDirect (Remef)"""
+    import feedparser
+    import datetime
+    import pandas as pd
+    import re
+    
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
         end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+        print(f"📅 CEMLA Investigación (RSS): {start_date.date()} a {end_date.date()}")
     except:
         start_date = datetime.datetime(2000, 1, 1)
         end_date = datetime.datetime.now()
+        print(f"⚠️ Error en fechas, usando rango por defecto")
     
-    print(f"📅 CEMLA: {start_date.date()} a {end_date.date()}")
+    rows = []
     
-    # Artículos de marzo 2026
-    articulos = [
-        {
-            "Date": datetime.datetime(2026, 3, 14),
-            "Title": "How accurately do consumers report their debts in household surveys?",
-            "Link": "https://www.sciencedirect.com/science/article/pii/S2666143826000116"
-        },
-        {
-            "Date": datetime.datetime(2026, 3, 12),
-            "Title": "A high frequency indicator of credit in Peru: A Random Forests and dynamic network connectedness approach",
-            "Link": "https://www.sciencedirect.com/science/article/pii/S2666143826000086"
-        },
-        {
-            "Date": datetime.datetime(2026, 3, 9),
-            "Title": "When climate and credit collide in Barbados’ economy",
-            "Link": "https://www.sciencedirect.com/science/article/pii/S2666143826000074"
-        }
-    ]
+    # RSS de ScienceDirect para la revista Remef (ISSN 2666-1438)
+    rss_url = "http://rss.sciencedirect.com/publication/science/26661438"
     
-    df = pd.DataFrame(articulos)
-    df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
-    df["Organismo"] = "CEMLA"
+    try:
+        print(f"📡 Solicitando RSS: {rss_url}")
+        feed = feedparser.parse(rss_url)
+        
+        if feed.bozo:  # bozo es 1 si hubo error de parsing
+            print(f"⚠️ Advertencia en el feed: {feed.bozo_exception}")
+        
+        print(f"✅ Artículos encontrados en RSS: {len(feed.entries)}")
+        
+        for entry in feed.entries:
+            # Extraer fecha de publicación
+            pub_date = None
+            if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                pub_date = datetime.datetime(*entry.published_parsed[:6])
+            elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
+                pub_date = datetime.datetime(*entry.updated_parsed[:6])
+            
+            if not pub_date:
+                continue
+            
+            # Filtrar por rango de fechas
+            if pub_date < start_date or pub_date > end_date:
+                continue
+            
+            # Título
+            titulo = entry.title if hasattr(entry, 'title') else ""
+            if not titulo:
+                continue
+            
+            # Enlace al artículo
+            link = entry.link if hasattr(entry, 'link') else ""
+            
+            # Autor (si está disponible en summary o author)
+            autor = ""
+            if hasattr(entry, 'author'):
+                autor = entry.author
+            elif hasattr(entry, 'summary'):
+                # Intentar extraer autor del summary
+                match = re.search(r'<dc:creator>(.*?)</dc:creator>', entry.summary)
+                if match:
+                    autor = match.group(1)
+            
+            # Limpiar título (eliminar saltos de línea, espacios extras)
+            titulo = re.sub(r'\s+', ' ', titulo).strip()
+            
+            # Si hay autor, incluirlo en el título (opcional)
+            if autor and autor not in titulo:
+                titulo = f"{autor}: {titulo}"
+            
+            rows.append({
+                "Date": pub_date,
+                "Title": titulo,
+                "Link": link,
+                "Organismo": "CEMLA"
+            })
+            print(f"  ✅ {pub_date.strftime('%Y-%m-%d')}: {titulo[:60]}...")
+        
+    except Exception as e:
+        print(f"❌ Error extrayendo RSS: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback a datos de ejemplo
+        print("⚠️ Usando datos de ejemplo como respaldo")
+        return load_investigacion_cemla_fallback(start_date, end_date)
+    
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.drop_duplicates(subset=['Link'])
+        df = df.sort_values("Date", ascending=False)
+        print(f"\n✅ TOTAL CEMLA INVESTIGACIÓN: {len(df)} artículos")
+    else:
+        print("⚠️ No se encontraron artículos en el RSS para el rango seleccionado")
     
     return df
 
