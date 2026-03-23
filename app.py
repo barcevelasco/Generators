@@ -309,7 +309,7 @@ def load_reportes_bid_en(start_date_str, end_date_str):
 
     return df
 
-# == Reportes BPI == 
+# == Reportes BPI == #
 
 @st.cache_data(show_spinner=False)
 def load_reportes_bpi(start_date_str, end_date_str):
@@ -391,6 +391,7 @@ def load_reportes_bpi(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes BM == #
 
 @st.cache_data(show_spinner=False)
 def load_reportes_bm(start_date_str, end_date_str):
@@ -473,6 +474,7 @@ def load_reportes_bm(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes CEF == #
 
 @st.cache_data(show_spinner=False)
 def load_reportes_cef(start_date_str, end_date_str):
@@ -515,6 +517,7 @@ def load_reportes_cef(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes OCDE == #
 
 @st.cache_data(show_spinner=False)
 def load_reportes_ocde(start_date_str, end_date_str):
@@ -568,6 +571,7 @@ def load_reportes_ocde(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes BPI == #
 
 @st.cache_data(show_spinner=False)
 def load_reportes_bpi(start_date_str, end_date_str):
@@ -685,6 +689,7 @@ def load_pub_inst_cef(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == BPI (Publicaciones Institucionales) == #
 
 @st.cache_data(show_spinner=False)
 def load_pub_inst_bpi(start_date_str, end_date_str):
@@ -735,6 +740,7 @@ def load_pub_inst_bpi(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes FMI == #
 
 @st.cache_data(show_spinner=False)
 def load_country_reports_fmi(start_date_str, end_date_str):
@@ -793,6 +799,7 @@ def load_country_reports_fmi(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes FMI - PRENSA == #
 
 @st.cache_data(show_spinner=False)
 def load_press_releases_fmi(start_date_str, end_date_str):
@@ -853,6 +860,7 @@ def load_press_releases_fmi(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Reportes FMI - COUNTRIES == #
 
 @st.cache_data(show_spinner=False)
 def load_country_reports_elibrary(start_date_str, end_date_str):
@@ -953,6 +961,7 @@ def load_country_reports_elibrary(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+# == Publicaciones Institucionales FMI == #
 
 @st.cache_data(show_spinner=False)
 def load_pub_inst_fmi(start_date_str, end_date_str):
@@ -1022,7 +1031,8 @@ def load_pub_inst_fmi(start_date_str, end_date_str):
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.sort_values("Date", ascending=False)
     return df
-
+    
+# == Publicaciones Institucionales BM == #
 
 @st.cache_data(show_spinner=False)
 def load_pub_inst_bm(start_date_str, end_date_str):
@@ -1964,6 +1974,7 @@ def load_data_ecb(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
+## == Discursos BIS == ## 
 
 @st.cache_data(show_spinner=False)
 def load_data_bis():
