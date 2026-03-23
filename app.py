@@ -1097,20 +1097,126 @@ def load_pub_inst_bm(start_date_str, end_date_str):
         df = df.sort_values("Date", ascending=False)
     return df
 
-
-# ========== FUNCIÓN PARA FMI ==========
+# ========== FUNCIÓN PARA FMI (F&D MAGAZINE) - VERSIÓN MEJORADA ==========
 @st.cache_data(show_spinner=False)
 def load_pub_inst_imf(start_date_str, end_date_str):
-    """Usa datos precargados de F&D Magazine"""
+    """Extrae artículos de F&D Magazine desde el JSON embebido en la página"""
+    import requests
+    import json
+    import re
+    import datetime
+    import pandas as pd
+
     try:
         start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
         end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+        print(f"📅 FMI F&D: {start_date.date()} a {end_date.date()}")
     except:
         start_date = datetime.datetime(2000, 1, 1)
         end_date = datetime.datetime.now()
-    
-    df = get_fandd_march2026()
-    df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+        print(f"⚠️ Error en fechas, usando rango por defecto")
+
+    url = "https://www.imf.org/en/publications/fandd/issues"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+    rows = []
+
+    try:
+        print(f"📡 Solicitando página: {url}")
+        res = requests.get(url, headers=headers, timeout=15)
+        
+        if res.status_code != 200:
+            print(f"❌ Error al acceder a la página: {res.status_code}")
+            return pd.DataFrame()
+
+        # Buscar el script con id="__NEXT_DATA__"
+        match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', res.text, re.DOTALL)
+        if not match:
+            print("❌ No se encontró el script __NEXT_DATA__")
+            return pd.DataFrame()
+
+        data = json.loads(match.group(1))
+        
+        # Navegar hasta issueList
+        try:
+            issue_list = data['props']['pageProps']['page']['placeholders']['Content'][0]['placeholders']['Article-1099474'][0]['fields']['issueList']
+        except (KeyError, IndexError, TypeError) as e:
+            print(f"❌ Error navegando en JSON: {e}")
+            return pd.DataFrame()
+
+        total_issues = issue_list.get('total', 0)
+        print(f"✅ Total de números encontrados: {total_issues}")
+
+        for issue in issue_list.get('results', []):
+            # Extraer fecha del número (issueLabel ej: "December 2025")
+            issue_label = issue.get('issueLabel', {}).get('value', '')
+            issue_date = None
+            
+            # Parsear fecha (ej: "December 2025" -> datetime(2025, 12, 1))
+            match_date = re.search(r'([A-Za-z]+)\s+(\d{4})', issue_label)
+            if match_date:
+                mes_str = match_date.group(1).lower()
+                año = int(match_date.group(2))
+                mes_num = {
+                    'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+                    'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12
+                }.get(mes_str, 1)
+                issue_date = datetime.datetime(año, mes_num, 1)
+            
+            if not issue_date:
+                continue
+            
+            # Filtrar por rango de fechas
+            if issue_date < start_date or issue_date > end_date:
+                print(f"⏭️ Número fuera de rango: {issue_label}")
+                continue
+            
+            print(f"\n📖 Procesando número: {issue_label}")
+            
+            # Procesar artículos del número
+            articles = issue.get('children', {}).get('results', [])
+            print(f"   Artículos encontrados: {len(articles)}")
+            
+            for article in articles:
+                # Título del artículo
+                title = article.get('articleTitle', {}).get('value', '')
+                if not title:
+                    continue
+                
+                # Enlace del artículo
+                article_url = article.get('url', {}).get('url', '')
+                if not article_url:
+                    continue
+                
+                # Categoría (útil para filtrar si se desea)
+                category = article.get('fANDDCategory', {}).get('id', '')
+                
+                # Limpiar título
+                title = re.sub(r'\s+', ' ', title).strip()
+                
+                rows.append({
+                    "Date": issue_date,
+                    "Title": title,
+                    "Link": article_url,
+                    "Organismo": "FMI"
+                })
+                print(f"  ✅ {title[:60]}...")
+        
+    except Exception as e:
+        print(f"❌ Error general: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.drop_duplicates(subset=['Link'])
+        df = df.sort_values("Date", ascending=False)
+        print(f"\n✅ TOTAL FMI F&D: {len(df)} artículos")
+    else:
+        print("⚠️ No se encontraron artículos en el rango seleccionado")
+
     return df
 
 # ========== FUNCIÓN PARA CEMLA (PUBLICACIONES INSTITUCIONALES) ==========
