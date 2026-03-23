@@ -309,6 +309,7 @@ def load_reportes_bid_en(start_date_str, end_date_str):
 
     return df
 
+# == Reportes BPI == 
 
 @st.cache_data(show_spinner=False)
 def load_reportes_bpi(start_date_str, end_date_str):
