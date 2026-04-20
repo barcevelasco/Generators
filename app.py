@@ -1909,6 +1909,102 @@ def load_investigacion_bid_en_fallback(start_date, end_date):
     return df
 
 # --- SECCIÓN: DISCURSOS ---
+
+## -- FMI - Discursos 
+
+@st.cache_data(show_spinner=False)
+def load_discursos_fmi(start_date_str, end_date_str):
+    """
+    Extractor FMI - Discursos y Transcripts (Coveo API)
+    """
+    import datetime
+    import requests
+    import pandas as pd
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    try:
+        start_date = datetime.datetime.strptime(start_date_str, '%d.%m.%Y')
+        end_date = datetime.datetime.strptime(end_date_str, '%d.%m.%Y')
+        print(f"📅 FMI Discursos y Transcripts: {start_date.date()} a {end_date.date()}")
+    except:
+        start_date = datetime.datetime(2025, 1, 1)
+        end_date = datetime.datetime.now()
+
+    rows = []
+    url = "https://imfproduction561s308u.org.coveo.com/rest/search/v2?organizationId=imfproduction561s308u"
+
+    headers = {
+        "Authorization": "Bearer xx742a6c66-f427-4f5a-ae1e-770dc7264e8a",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    # Incluir tanto SPEECHES como TRANSCRIPTS
+    payload = {
+        "aq": "@imftype==(\"Speech\",\"Transcript\") AND @syslanguage==\"English\"",
+        "numberOfResults": 150,
+        "sortCriteria": "@imfdate descending"
+    }
+
+    try:
+        print("   📡 Solicitando discursos y transcripts del FMI a Coveo API...")
+        response = requests.post(url, headers=headers, json=payload, timeout=15, verify=False)
+
+        if response.status_code == 200:
+            data = response.json()
+            print(f"   ✅ Total resultados en API: {data.get('totalCount', 0)}")
+
+            for item in data.get("results", []):
+                titulo = item.get("title", "").strip()
+                link = item.get("clickUri", "")
+                raw_date = item.get("raw", {}).get("date")
+                speaker = item.get("raw", {}).get("imfspeaker", "")
+                content_type = item.get("raw", {}).get("imftype", "")
+
+                if isinstance(speaker, list) and len(speaker) > 0:
+                    speaker = speaker[0]
+                elif not speaker:
+                    speaker = "IMF Staff"
+
+                if not titulo or not link or not raw_date:
+                    continue
+
+                try:
+                    parsed_date = datetime.datetime.fromtimestamp(raw_date / 1000.0)
+                except:
+                    continue
+
+                if start_date <= parsed_date <= end_date:
+                    # Limpiar título (opcional)
+                    if " - " in titulo:
+                        titulo = titulo.split(" - ")[0]
+                    
+                    titulo_final = f"{speaker}: {titulo}"
+                    rows.append({
+                        "Date": parsed_date,
+                        "Title": titulo_final,
+                        "Link": link,
+                        "Organismo": "FMI"
+                    })
+                    print(f"      ✅ [{content_type}] {parsed_date.strftime('%d/%m/%Y')}: {speaker} - {titulo[:50]}...")
+
+        else:
+            print(f"   ❌ Error en API: {response.status_code}")
+
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date", ascending=False)
+        df = df.drop_duplicates(subset=['Title'], keep='first')
+        df = df.drop_duplicates(subset=['Link'], keep='first')
+
+    print(f"📊 FMI Discursos - Total: {len(df)}")
+    return df
+
 @st.cache_data(show_spinner=False)
 def load_data_ecb(start_date_str, end_date_str):
     headers = {'User-Agent': 'Mozilla/5.0'}
