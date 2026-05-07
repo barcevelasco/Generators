@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Búsqueda híbrida + IA | Tesis UNAM</title>
+    <!-- Plotly para gráficos interactivos -->
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: #f9f8f6;
+            color: #1e1e1e;
+            padding: 2rem;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 2rem; font-weight: 600; margin-bottom: 0.5rem; }
+        .sub {
+            color: #5a5a5a;
+            margin-bottom: 2rem;
+            border-left: 3px solid #c7a03b;
+            padding-left: 1rem;
+        }
+        .search-panel {
+            background: white;
+            border-radius: 1.5rem;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.03);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid #ece8e0;
+            position: relative;
+        }
+        .input-group { margin-bottom: 1.2rem; position: relative; }
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #5a4a2e;
+            margin-bottom: 0.4rem;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd6cc;
+            border-radius: 1rem;
+            font-family: inherit;
+            font-size: 0.9rem;
+            background: #fffefc;
+        }
+        textarea { resize: vertical; }
+        /* Estilos para chips */
+        .chips-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .chip {
+            background: #f0ede7;
+            border-radius: 2rem;
+            padding: 0.3rem 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+        }
+        .chip .remove {
+            cursor: pointer;
+            font-weight: bold;
+            color: #8B5A2B;
+        }
+        .add-field {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-top: 0.3rem;
+        }
+        .add-field input {
+            flex: 1;
+            padding: 0.5rem;
+            border-radius: 2rem;
+        }
+        .add-field button {
+            background: #2c2c2c;
+            color: white;
+            border: none;
+            border-radius: 2rem;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+        }
+        /* Ventana flotante de verbos */
+        .verb-popup {
+            position: absolute;
+            z-index: 30;
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2);
+            border: 1px solid #ece8e0;
+            padding: 1rem;
+            width: 100%;
+            max-width: 500px;
+            margin-top: 0.5rem;
+            display: none;
+            backdrop-filter: blur(4px);
+            background: rgba(255,255,255,0.95);
+        }
+        .verb-popup-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            border-bottom: 1px solid #f0eade;
+            padding-bottom: 0.5rem;
+        }
+        .verb-popup-header button {
+            background: none;
+            border: none;
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 0 0.3rem;
+        }
+        .verb-suggestion-section {
+            margin-bottom: 0.8rem;
+            padding: 0.3rem;
+            border-left: 3px solid;
+            border-radius: 0 0.5rem 0.5rem 0;
+        }
+        /* Colores sutiles por categoría */
+        .verb-suggestion-section[data-cat="Recordar"] { border-left-color: #a8d5e5; background: #f5fafd; }
+        .verb-suggestion-section[data-cat="Comprender"] { border-left-color: #b5e3c8; background: #f5fdf8; }
+        .verb-suggestion-section[data-cat="Aplicar"] { border-left-color: #ffe0a3; background: #fffbf0; }
+        .verb-suggestion-section[data-cat="Analizar"] { border-left-color: #f7c5c5; background: #fff6f6; }
+        .verb-suggestion-section[data-cat="Evaluar"] { border-left-color: #d4b8e0; background: #fdfaff; }
+        .verb-suggestion-section[data-cat="Crear"] { border-left-color: #c5e0d4; background: #f5fef9; }
+        .verb-suggestion-section h4 {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #8B5A2B;
+            margin-bottom: 0.3rem;
+        }
+        .verb-chips-suggest {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+        }
+        .verb-chip-suggest {
+            background: #f0ede7;
+            padding: 0.2rem 0.6rem;
+            border-radius: 2rem;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: 0.1s;
+        }
+        .verb-chip-suggest:hover { background: #e0d6c8; }
+        .expand-btn {
+            text-align: center;
+            margin-top: 0.5rem;
+            font-size: 0.7rem;
+            color: #8B5A2B;
+            cursor: pointer;
+        }
+        .full-verbs-list {
+            display: none;
+            margin-top: 0.8rem;
+            max-height: 300px;
+            overflow-y: auto;
+            border-top: 1px solid #f0eade;
+            padding-top: 0.5rem;
+        }
+        .full-verbs-section {
+            margin-bottom: 0.8rem;
+        }
+        .full-verbs-section h4 {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #5a4a2e;
+        }
+        .full-verbs-list .verb-chip-suggest {
+            font-size: 0.65rem;
+        }
+        /* Estilo para el foco (💡) */
+        .verb-bulb {
+            display: inline-block;
+            margin-left: 0.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            background: rgba(0,0,0,0.08);
+            border-radius: 50%;
+            width: 1.4rem;
+            height: 1.4rem;
+            text-align: center;
+            line-height: 1.4rem;
+            transition: background 0.2s;
+        }
+        .verb-bulb:hover {
+            background: rgba(0,0,0,0.15);
+        }
+        .flex-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: flex-end;
+            margin-top: 0.5rem;
+        }
+        .flex-row > div { flex: 1; min-width: 180px; }
+        select, button {
+            padding: 0.6rem 1rem;
+            border-radius: 2rem;
+            border: 1px solid #ddd6cc;
+            background: white;
+        }
+        button {
+            background: #2c2c2c;
+            color: white;
+            border: none;
+            font-weight: 500;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:hover { background: #1a1a1a; }
+        button:disabled { background: #b0a898; cursor: not-allowed; }
+        .results {
+            background: white;
+            border-radius: 1.5rem;
+            border: 1px solid #ece8e0;
+            overflow: hidden;
+        }
+        .result-item {
+            padding: 1.2rem 1.5rem;
+            border-bottom: 1px solid #f0ede7;
+            transition: background 0.1s;
+        }
+        .result-item:hover { background: #fdfaf5; }
+        .score {
+            display: inline-block;
+            background: #e7e1d4;
+            padding: 0.2rem 0.6rem;
+            border-radius: 2rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-left: 0.8rem;
+        }
+        .title {
+            font-weight: 600;
+            font-size: 1.05rem;
+            margin-bottom: 0.3rem;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .meta {
+            font-size: 0.8rem;
+            color: #6b5a42;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 0.4rem;
+        }
+        .badge {
+            background: #f0eade;
+            padding: 0.15rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.7rem;
+        }
+        .relevance-badge {
+            font-size: 0.6rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 2rem;
+            font-weight: 500;
+            margin-left: 0.5rem;
+        }
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            align-items: center;
+        }
+        .filter-chip {
+            background: #f0ede7;
+            padding: 0.3rem 0.9rem;
+            border-radius: 2rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: 0.1s;
+        }
+        .filter-chip.active {
+            background: #2c2c2c;
+            color: white;
+        }
+        .info-message {
+            padding: 2rem;
+            text-align: center;
+            color: #8e7a5e;
+        }
+        .note {
+            font-size: 0.7rem;
+            color: #b0a090;
+            margin-top: 0.5rem;
+        }
+        .explanation {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f5f0e8;
+            border-radius: 1rem;
+            font-size: 0.85rem;
+        }
+        .explanation strong {
+            color: #5a4a2e;
+        }
+        .explanation ol {
+            margin-left: 1.5rem;
+            margin-top: 0.5rem;
+        }
+        .explanation li {
+            margin-bottom: 0.3rem;
+        }
+        .comparison-block {
+            margin-top: 0.5rem;
+            background: #fef9e6;
+            border-left: 3px solid #c7a03b;
+            padding: 0.3rem 0.6rem;
+            border-radius: 0.5rem;
+            font-size: 0.75rem;
+        }
+        .research-block {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #e6f3ff;
+            border-radius: 1rem;
+            border-left: 4px solid #2c6e9e;
+        }
+        .chart-container {
+            margin-top: 2rem;
+            background: white;
+            border-radius: 1.5rem;
+            padding: 1rem;
+            border: 1px solid #ece8e0;
+        }
+        .info-warning {
+            background: #fff3e0;
+            border-left: 4px solid #c7a03b;
+            padding: 0.5rem 1rem;
+            border-radius: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+        }
+        .result-item.exploratory {
+            opacity: 0.7;
+            filter: grayscale(10%);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🧠 Búsqueda híbrida + IA explicable</h1>
+    <div class="sub">Modelo multilingüe · Re‑ranking con Groq · Puntuación multiplicativa (semántica + keywords)</div>
+
+    <div class="search-panel">
+        <!-- Título -->
+        <div class="input-group">
+            <label>📌 Título tentativo de tu tesis</label>
+            <textarea id="tituloInput" rows="2" placeholder="Ej: 'Impacto económico de la pandemia en México'"></textarea>
+        </div>
+
+        <!-- Palabras clave (chips) -->
+        <div class="input-group">
+            <label>🔑 Palabras clave</label>
+            <div id="keywordsContainer" class="chips-container"></div>
+            <div class="add-field">
+                <input type="text" id="newKeyword" placeholder="Escribe una palabra y presiona +">
+                <button id="addKeywordBtn">+</button>
+            </div>
+        </div>
+
+        <!-- Objetivos (chips de texto libre) -->
+        <div class="input-group" id="objectiveGroup">
+            <label>📝 Objetivo(s) de tu tesis <span id="verbBulb" class="verb-bulb" title="Ver lista completa de verbos">💡</span></label>
+            <div id="objectivesContainer" class="chips-container"></div>
+            <div class="add-field">
+                <input type="text" id="newObjective" placeholder="Escribe un objetivo y presiona +">
+                <button id="addObjectiveBtn">+</button>
+            </div>
+            <div id="verbPopup" class="verb-popup">
+                <div class="verb-popup-header">
+                    <span>💡 Verbos sugeridos para iniciar tu objetivo</span>
+                    <div>
+                        <button id="refreshSuggestionsBtn" title="Refrescar sugerencias">⟳</button>
+                        <button id="closePopupBtn" title="Cerrar">✕</button>
+                    </div>
+                </div>
+                <div id="suggestionsContent"></div>
+                <div class="expand-btn" id="expandFullListBtn">📚 Mostrar lista completa de verbos</div>
+                <div id="fullVerbsList" class="full-verbs-list"></div>
+            </div>
+        </div>
+
+        <div class="flex-row">
+            <div>
+                <label>🎯 Top K</label>
+                <select id="topK">
+                    <option>10</option>
+                    <option>15</option>
+                    <option>20</option>
+                </select>
+            </div>
+            <div>
+                <button id="searchBtn">🔍 Buscar tesis similares</button>
+            </div>
+            <div>
+                <button id="plotBtn" class="bg-amber-700 hover:bg-amber-800">📊 Graficar tendencias de palabras clave</button>
+            </div>
+        </div>
+        <div class="note">💡 Búsqueda: similitud coseno × (1 + 0.5 × coincidencia de keywords). La IA reordena, compara y sugiere preguntas.</div>
+    </div>
+
+    <div id="filterBar" class="filters"></div>
+
+    <div class="results" id="resultsContainer">
+        <div class="info-message">🔮 Cargando datos y modelo...</div>
+    </div>
+
+    <div id="keywordChart" class="chart-container" style="display: none;"></div>
+</div>
+
+<script type="importmap">
+    { "imports": { "@xenova/transformers": "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js" } }
+</script>
+<script type="module">
+    import { pipeline } from '@xenova/transformers';
+
+    // ---------- Estado ----------
+    let dataset = [];
+    let allEmbeddings = null;
+    let currentFilter = "TODOS";
+    let availableCategories = new Set();
+    let embedder = null;
+    let lastQueryVector = null;
+    let currentResults = [];
+    let currentComparisons = {};
+    let currentResearchQuestions = [];
+
+    // Elementos DOM
+    const searchBtn = document.getElementById('searchBtn');
+    const plotBtn = document.getElementById('plotBtn');
+    const tituloInput = document.getElementById('tituloInput');
+    const keywordsContainer = document.getElementById('keywordsContainer');
+    const newKeywordInput = document.getElementById('newKeyword');
+    const addKeywordBtn = document.getElementById('addKeywordBtn');
+    const objectivesContainer = document.getElementById('objectivesContainer');
+    const newObjectiveInput = document.getElementById('newObjective');
+    const addObjectiveBtn = document.getElementById('addObjectiveBtn');
+    const topKSelect = document.getElementById('topK');
+    const resultsDiv = document.getElementById('resultsContainer');
+    const filterBar = document.getElementById('filterBar');
+    const chartDiv = document.getElementById('keywordChart');
+    const verbPopup = document.getElementById('verbPopup');
+    const suggestionsContent = document.getElementById('suggestionsContent');
+    const fullVerbsListDiv = document.getElementById('fullVerbsList');
+    const refreshBtn = document.getElementById('refreshSuggestionsBtn');
+    const closePopupBtn = document.getElementById('closePopupBtn');
+    const expandBtn = document.getElementById('expandFullListBtn');
+    const verbBulb = document.getElementById('verbBulb');
+
+    // ---------- Gestión de palabras clave (chips) ----------
+    let keywordsList = [];
+
+    function renderKeywords() {
+        keywordsContainer.innerHTML = '';
+        keywordsList.forEach((kw, idx) => {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.innerHTML = `${escapeHtml(kw)} <span class="remove" data-idx="${idx}">✕</span>`;
+            keywordsContainer.appendChild(chip);
+        });
+        document.querySelectorAll('#keywordsContainer .chip .remove').forEach(el => {
+            el.addEventListener('click', (e) => {
+                const idx = parseInt(e.target.dataset.idx);
+                keywordsList.splice(idx, 1);
+                renderKeywords();
+            });
+        });
+    }
+
+    addKeywordBtn.addEventListener('click', () => {
+        let kw = newKeywordInput.value.trim().toLowerCase();
+        if (kw && !keywordsList.includes(kw)) {
+            keywordsList.push(kw);
+            renderKeywords();
+            newKeywordInput.value = '';
+        }
+    });
+    newKeywordInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addKeywordBtn.click();
+    });
+
+    // ---------- Gestión de objetivos (chips de texto libre) ----------
+    let objectivesList = [];
+
+    function renderObjectives() {
+        objectivesContainer.innerHTML = '';
+        objectivesList.forEach((obj, idx) => {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.innerHTML = `${escapeHtml(obj)} <span class="remove" data-idx="${idx}">✕</span>`;
+            objectivesContainer.appendChild(chip);
+        });
+        document.querySelectorAll('#objectivesContainer .chip .remove').forEach(el => {
+            el.addEventListener('click', (e) => {
+                const idx = parseInt(e.target.dataset.idx);
+                objectivesList.splice(idx, 1);
+                renderObjectives();
+            });
+        });
+    }
+
+    function addObjective(text) {
+        text = text.trim();
+        if (text) {
+            objectivesList.push(text);
+            renderObjectives();
+        }
+    }
+
+    addObjectiveBtn.addEventListener('click', () => {
+        addObjective(newObjectiveInput.value);
+        newObjectiveInput.value = '';
+    });
+    newObjectiveInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addObjectiveBtn.click();
+    });
+
+    // ---------- Verbos y ventana flotante ----------
+    const fullVerbs = {
+        "Recordar": ["Definir", "Describir", "Encontrar", "Enumerar", "Identificar", "Nombrar", "Recordar", "Relacionar", "Relatar", "Repetir", "Subrayar"],
+        "Comprender": ["Describir", "Discutir", "Explicar", "Expresar", "Identificar", "Localizar", "Reconocer", "Revisar", "Traducir"],
+        "Aplicar": ["Aplicar", "Demostrar", "Dramatizar", "Emplear", "Ilustrar", "Interpretar", "Operar", "Practicar", "Programar", "Usar"],
+        "Analizar": ["Analizar", "Calcular", "Comparar", "Contrastar", "Criticar", "Diferenciar", "Diagramar", "Distinguir", "Experimentar", "Inspeccionar", "Probar"],
+        "Evaluar": ["Arreglar", "Coleccionar", "Componer", "Concluir", "Construir", "Diseñar", "Ensamblar", "Formular", "Proponer", "Apreciar", "Calificar", "Escoger", "Estimar", "Evaluar", "Juzgar", "Medir", "Revisar", "Seleccionar", "Valuar"],
+        "Crear": ["Apreciar", "Calificar", "Escoger", "Estimar", "Evaluar", "Juzgar", "Medir", "Revisar", "Seleccionar", "Valuar"]
+    };
+    const orderedCategories = ["Recordar", "Comprender", "Aplicar", "Analizar", "Evaluar", "Crear"];
+    for (let cat in fullVerbs) {
+        fullVerbs[cat].sort((a,b) => a.localeCompare(b));
+    }
+
+    let isFullListVisible = false;
+    let currentSuggestions = {};
+
+    function getRandomVerbs() {
+        const shuffled = [...orderedCategories];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        const selected = shuffled.slice(0, 3);
+        const suggestions = {};
+        for (const cat of selected) {
+            const verbs = fullVerbs[cat];
+            const shuffledVerbs = [...verbs];
+            for (let i = shuffledVerbs.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffledVerbs[i], shuffledVerbs[j]] = [shuffledVerbs[j], shuffledVerbs[i]];
+            }
+            suggestions[cat] = shuffledVerbs.slice(0, 5);
+        }
+        return suggestions;
+    }
+
+    function renderSuggestions(suggestions) {
+        suggestionsContent.innerHTML = '';
+        for (const [cat, verbs] of Object.entries(suggestions)) {
+            const section = document.createElement('div');
+            section.className = 'verb-suggestion-section';
+            section.setAttribute('data-cat', cat);
+            section.innerHTML = `<h4>${cat}</h4><div class="verb-chips-suggest"></div>`;
+            const chipsDiv = section.querySelector('.verb-chips-suggest');
+            verbs.forEach(v => {
+                const chip = document.createElement('span');
+                chip.className = 'verb-chip-suggest';
+                chip.textContent = v;
+                chip.addEventListener('click', () => {
+                    // Insertar verbo en el campo de nuevo objetivo
+                    const currentText = newObjectiveInput.value;
+                    newObjectiveInput.value = currentText.trim() === '' ? v : currentText + ' ' + v;
+                    newObjectiveInput.focus();
+                    // Cerrar el popup automáticamente
+                    hidePopup();
+                });
+                chipsDiv.appendChild(chip);
+            });
+            suggestionsContent.appendChild(section);
+        }
+    }
+
+    function buildFullVerbsList() {
+        let html = '';
+        for (const cat of orderedCategories) {
+            html += `<div class="full-verbs-section"><h4>${cat}</h4><div class="verb-chips-suggest">`;
+            fullVerbs[cat].forEach(v => {
+                html += `<span class="verb-chip-suggest" data-verb="${v}">${v}</span>`;
+            });
+            html += `</div></div>`;
+        }
+        fullVerbsListDiv.innerHTML = html;
+        fullVerbsListDiv.querySelectorAll('.verb-chip-suggest').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const verb = chip.dataset.verb;
+                const currentText = newObjectiveInput.value;
+                newObjectiveInput.value = currentText.trim() === '' ? verb : currentText + ' ' + verb;
+                newObjectiveInput.focus();
+                hidePopup();
+            });
+        });
+    }
+
+    function refreshSuggestions() {
+        currentSuggestions = getRandomVerbs();
+        renderSuggestions(currentSuggestions);
+    }
+
+    function showPopup() {
+        if (!isFullListVisible) {
+            renderSuggestions(currentSuggestions);
+            fullVerbsListDiv.style.display = 'none';
+        } else {
+            fullVerbsListDiv.style.display = 'block';
+            suggestionsContent.style.display = 'none';
+        }
+        verbPopup.style.display = 'block';
+    }
+
+    function hidePopup() {
+        verbPopup.style.display = 'none';
+    }
+
+    // Eventos del popup
+    refreshBtn.addEventListener('click', () => {
+        if (isFullListVisible) {
+            isFullListVisible = false;
+            fullVerbsListDiv.style.display = 'none';
+            suggestionsContent.style.display = 'block';
+            refreshSuggestions();
+        } else {
+            refreshSuggestions();
+        }
+    });
+    closePopupBtn.addEventListener('click', hidePopup);
+    expandBtn.addEventListener('click', () => {
+        if (!isFullListVisible) {
+            isFullListVisible = true;
+            buildFullVerbsList();
+            fullVerbsListDiv.style.display = 'block';
+            suggestionsContent.style.display = 'none';
+            expandBtn.textContent = '➖ Mostrar menos';
+        } else {
+            isFullListVisible = false;
+            fullVerbsListDiv.style.display = 'none';
+            suggestionsContent.style.display = 'block';
+            expandBtn.textContent = '📚 Mostrar lista completa de verbos';
+            refreshSuggestions();
+        }
+    });
+
+    // Mostrar popup al hacer focus en el campo de nuevo objetivo
+    newObjectiveInput.addEventListener('focus', () => {
+        if (!isFullListVisible) {
+            currentSuggestions = getRandomVerbs();
+            renderSuggestions(currentSuggestions);
+        }
+        showPopup();
+    });
+    // Cerrar popup si se hace clic fuera
+    document.addEventListener('click', (e) => {
+        if (!verbPopup.contains(e.target) && e.target !== newObjectiveInput && e.target !== addObjectiveBtn && e.target !== verbBulb) {
+            hidePopup();
+        }
+    });
+
+    // Foco (💡) muestra lista completa
+    if (verbBulb) {
+        verbBulb.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (verbPopup.style.display !== 'block') {
+                showPopup();
+            }
+            if (!isFullListVisible) {
+                isFullListVisible = true;
+                buildFullVerbsList();
+                fullVerbsListDiv.style.display = 'block';
+                suggestionsContent.style.display = 'none';
+                expandBtn.textContent = '➖ Mostrar menos';
+            } else {
+                buildFullVerbsList();
+            }
+        });
+    }
+
+    // Inicializar sugerencias aleatorias
+    currentSuggestions = getRandomVerbs();
+    buildFullVerbsList();
+
+    // ---------- Resto de lógica de búsqueda ----------
+    async function loadDataset() {
+        try {
+            const response = await fetch('muestra_tesis_norm.json');
+            if (!response.ok) throw new Error(`No se encontró muestra_tesis_norm.json`);
+            dataset = await response.json();
+            if (!dataset.length) throw new Error('Dataset vacío');
+
+            const dim = dataset[0].embedding.length;
+            allEmbeddings = new Float32Array(dataset.length * dim);
+            for (let i = 0; i < dataset.length; i++) {
+                const emb = dataset[i].embedding;
+                for (let j = 0; j < dim; j++) {
+                    allEmbeddings[i * dim + j] = emb[j];
+                }
+            }
+
+            dataset.forEach(d => availableCategories.add(d.categoria));
+            availableCategories = Array.from(availableCategories).sort();
+            renderFilterChips();
+
+            resultsDiv.innerHTML = `<div class="info-message">✅ Dataset cargado: ${dataset.length} tesis. Modelo listo.</div>`;
+            return true;
+        } catch (err) {
+            resultsDiv.innerHTML = `<div class="info-message">❌ Error: ${err.message}<br>¿Tienes "muestra_tesis_norm.json"?</div>`;
+            return false;
+        }
+    }
+
+    function renderFilterChips() {
+        const chips = ['TODOS', ...availableCategories];
+        filterBar.innerHTML = chips.map(cat => `
+            <div class="filter-chip ${currentFilter === cat ? 'active' : ''}" data-cat="${cat}">${cat}</div>
+        `).join('');
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                currentFilter = chip.dataset.cat;
+                renderFilterChips();
+                if (lastQueryVector !== null) performSearch();
+            });
+        });
+    }
+
+    async function getEmbedder() {
+        if (!embedder) {
+            resultsDiv.innerHTML = `<div class="info-message">🔄 Cargando modelo multilingüe (≈500 MB). Puede tomar hasta 30 s la primera vez.</div>`;
+            embedder = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2');
+            resultsDiv.innerHTML = `<div class="info-message">✅ Modelo listo. Ahora puedes buscar.</div>`;
+        }
+        return embedder;
+    }
+
+    function normalizeText(text) {
+        return text.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^\w\s]/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ');
+    }
+
+    function tokenize(text) {
+        return text.toLowerCase().split(/[\s,]+/).filter(t => t.length > 1);
+    }
+
+    function keywordMatchScore(userKeywordsArray, thesisTitle) {
+        if (!userKeywordsArray.length || !thesisTitle) return 0;
+        const userTokens = userKeywordsArray.map(k => normalizeText(k));
+        const titleTokens = tokenize(thesisTitle);
+        const intersection = userTokens.filter(t => titleTokens.includes(t)).length;
+        return intersection / userTokens.length;
+    }
+
+    async function textToVector(text) {
+        const pipe = await getEmbedder();
+        const output = await pipe(text, { pooling: 'mean', normalize: true });
+        return Array.from(output.data);
+    }
+
+    async function hybridSearch(titleText, keywordsArray, objectivesText) {
+        if (!titleText.trim()) throw new Error("Escribe al menos un título.");
+        const normalizedTitle = normalizeText(titleText);
+        const titleVec = await textToVector(normalizedTitle);
+        lastQueryVector = titleVec;
+        
+        const dim = titleVec.length;
+        const N = dataset.length;
+        const cosineScores = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+            let dot = 0;
+            const offset = i * dim;
+            for (let j = 0; j < dim; j++) {
+                dot += titleVec[j] * allEmbeddings[offset + j];
+            }
+            cosineScores[i] = Math.max(0, dot);
+        }
+        
+        const kwScores = new Float32Array(N);
+        if (keywordsArray.length) {
+            for (let i = 0; i < N; i++) {
+                kwScores[i] = keywordMatchScore(keywordsArray, dataset[i].titulo);
+            }
+        }
+        
+        const finalScores = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+            finalScores[i] = cosineScores[i] * (1 + 0.5 * kwScores[i]);
+        }
+        return finalScores;
+    }
+
+    async function performSearch() {
+        const title = tituloInput.value.trim();
+        if (!title) { alert("Escribe un título tentativo."); return; }
+        const keywordsArray = keywordsList;
+        const objectivesText = objectivesList.join(' '); // concatenar todos los objetivos
+        searchBtn.disabled = true;
+        searchBtn.textContent = "🔍 Buscando...";
+        
+        try {
+            const rawScores = await hybridSearch(title, keywordsArray, objectivesText);
+            let results = dataset.map((item, idx) => ({
+                ...item,
+                id: idx,
+                rawScore: rawScores[idx]
+            }));
+            if (currentFilter !== "TODOS") {
+                results = results.filter(r => r.categoria === currentFilter);
+            }
+            results.sort((a,b) => b.rawScore - a.rawScore);
+            const topK = parseInt(topKSelect.value, 10);
+            const topResults = results.slice(0, topK);
+            
+            let minScore = topResults.length ? topResults[topResults.length-1].rawScore : 0;
+            let maxScore = topResults.length ? topResults[0].rawScore : 1;
+            if (maxScore === minScore) maxScore = minScore + 1;
+            for (let r of topResults) {
+                r.displayScore = ((r.rawScore - minScore) / (maxScore - minScore)) * 100;
+            }
+            
+            currentResults = topResults;
+            currentComparisons = {};
+            currentResearchQuestions = [];
+            renderResults(topResults);
+            const oldExp = document.getElementById('aiExplanation');
+            if (oldExp) oldExp.remove();
+            const oldRQ = document.getElementById('researchQuestionsBlock');
+            if (oldRQ) oldRQ.remove();
+            chartDiv.style.display = 'none';
+        } catch (err) {
+            console.error(err);
+            resultsDiv.innerHTML = `<div class="info-message">⚠️ Error: ${err.message}</div>`;
+        } finally {
+            searchBtn.disabled = false;
+            searchBtn.textContent = "🔍 Buscar tesis similares";
+        }
+    }
+    
+    function getRelevanceLevel(score, maxScore) {
+        if (maxScore === 0) return { level: 'exploratory', label: 'Exploratoria', color: '#9a9a9a' };
+        const relative = score / maxScore;
+        if (relative >= 0.85) return { level: 'high', label: 'Alta relevancia', color: '#2d7a4a' };
+        if (relative >= 0.60) return { level: 'medium', label: 'Relacionada', color: '#8a6a2e' };
+        return { level: 'exploratory', label: 'Exploratoria', color: '#9a9a9a' };
+    }
+    
+    function renderResults(results) {
+        if (!results.length) {
+            resultsDiv.innerHTML = `<div class="info-message">No se encontraron tesis con el filtro actual.</div>`;
+            return;
+        }
+        const maxRaw = results[0].rawScore;
+        const highCount = results.filter(r => getRelevanceLevel(r.rawScore, maxRaw).level === 'high').length;
+        let warningHtml = '';
+        if (highCount < 3 && results.length > highCount) {
+            warningHtml = `<div class="info-warning">⚠️ Solo se encontraron ${highCount} tesis con alta similitud. Los resultados "Exploratoria" pueden ser menos precisos. Prueba añadir sinónimos o términos más específicos.</div>`;
+        }
+        const html = results.map(r => {
+            const { level, label, color } = getRelevanceLevel(r.rawScore, maxRaw);
+            const extraClass = level === 'exploratory' ? 'exploratory' : '';
+            const badgeHtml = `<span class="relevance-badge" style="background:${color}20; color:${color}; border:1px solid ${color}80;">${label}</span>`;
+            let comparisonHtml = '';
+            if (currentComparisons && currentComparisons[r.id]) {
+                const comp = currentComparisons[r.id];
+                comparisonHtml = `<div class="comparison-block">
+                    <strong>🔍 Similitud:</strong> ${escapeHtml(comp.similitud)}<br>
+                    <strong>⚡ Diferencia:</strong> ${escapeHtml(comp.diferencia)}
+                </div>`;
+            }
+            return `
+            <div class="result-item ${extraClass}">
+                <div class="title">
+                    <span>${escapeHtml(r.titulo || "Sin título")}</span>
+                    <span class="score">${r.displayScore.toFixed(0)}%</span>
+                    ${badgeHtml}
+                </div>
+                <div class="meta">
+                    <span>✍️ ${escapeHtml(r.autor || "Autor desconocido")}</span>
+                    <span>🎓 ${r.grado || ""}</span>
+                    <span>📅 ${r.año || ""}</span>
+                    <span class="badge">${r.categoria || "Otro"}</span>
+                    <span>🏛️ ${escapeHtml(r.plantel?.substring(0, 60) || "")}</span>
+                </div>
+                <div class="meta">🧑‍🏫 Asesor: ${escapeHtml(r.asesor || "—")}</div>
+                ${comparisonHtml}
+            </div>
+        `}).join('');
+        resultsDiv.innerHTML = warningHtml + `<div style="padding:0.8rem 1.2rem; background:#fefaf0; border-bottom:1px solid #e0d6c8;">🔎 ${results.length} resultados (filtro: ${currentFilter})</div>` + html;
+    }
+    
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+    
+    // ---------- Re‑ranking con IA (Groq) ----------
+    async function rerankWithAI() {
+        if (!currentResults.length) {
+            alert('Primero haz una búsqueda.');
+            return;
+        }
+        const originalResults = [...currentResults];
+        const candidatesForAI = originalResults.slice(0, 10).map(r => ({
+            id: r.id,
+            titulo: r.titulo
+        }));
+        
+        rerankButton.disabled = true;
+        rerankButton.textContent = 'Reordenando con IA...';
+        
+        try {
+            const WORKER_URL = 'https://tesis-reranker.sebastiaan-diaz-prado.workers.dev/api/rerank';
+            const response = await fetch(WORKER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    queryTitle: tituloInput.value,
+                    queryDescription: objectivesList.join(' '), // usar objetivos concatenados
+                    keywords: keywordsList.join(', '),
+                    candidates: candidatesForAI
+                })
+            });
+            const data = await response.json();
+            if (data.success && data.ranking && data.ranking.length) {
+                const mapById = Object.fromEntries(originalResults.map(r => [r.id, r]));
+                const reordered = data.ranking.map(id => mapById[id]).filter(Boolean);
+                if (reordered.length) {
+                    currentResults = reordered;
+                    currentComparisons = data.comparisons || {};
+                    currentResearchQuestions = data.researchQuestions || [];
+                    const maxRaw = Math.max(...currentResults.map(r => r.rawScore));
+                    const minRaw = Math.min(...currentResults.map(r => r.rawScore));
+                    for (let r of currentResults) {
+                        r.displayScore = maxRaw === minRaw ? 0 : ((r.rawScore - minRaw) / (maxRaw - minRaw)) * 100;
+                    }
+                    renderResults(currentResults);
+                    showExplanation(data.ranking, data.reasons || {});
+                    showResearchQuestions(currentResearchQuestions);
+                } else {
+                    alert('No se pudo reconstruir la lista (IDs no coinciden).');
+                }
+            } else {
+                alert('Error: ' + (data.error || 'No se obtuvo ranking'));
+            }
+        } catch (err) {
+            alert('No se pudo conectar con el Worker. Revisa la consola.');
+            console.error(err);
+        } finally {
+            rerankButton.disabled = false;
+            rerankButton.textContent = '🤖 Reordenar con IA (Groq)';
+        }
+    }
+    
+    function showExplanation(ranking, reasons) {
+        let html = `<div class="explanation" id="aiExplanation">
+            <strong>🧠 Explicación del orden (IA - Groq)</strong>
+            <ol>`;
+        for (const id of ranking) {
+            const reason = reasons[id] || "Sin razón específica";
+            html += `<li><strong>ID ${id}:</strong> ${escapeHtml(reason)}</li>`;
+        }
+        html += `</ol></div>`;
+        const existing = document.getElementById('aiExplanation');
+        if (existing) existing.remove();
+        const resultsContainer = document.getElementById('resultsContainer');
+        resultsContainer.insertAdjacentHTML('afterend', html);
+    }
+    
+    function showResearchQuestions(questions) {
+        if (!questions || !questions.length) return;
+        let html = `<div id="researchQuestionsBlock" class="research-block">
+            <strong>💡 Preguntas de investigación sugeridas (IA)</strong>
+            <ul style="margin-top: 0.5rem; margin-left: 1.5rem;">`;
+        for (const q of questions) {
+            html += `<li>${escapeHtml(q)}</li>`;
+        }
+        html += `</ul></div>`;
+        const existing = document.getElementById('researchQuestionsBlock');
+        if (existing) existing.remove();
+        const explanationDiv = document.getElementById('aiExplanation');
+        if (explanationDiv) {
+            explanationDiv.insertAdjacentHTML('afterend', html);
+        } else {
+            resultsDiv.insertAdjacentHTML('afterend', html);
+        }
+    }
+    
+    // ---------- Gráfico de palabras clave (subplots) ----------
+    function plotKeywordFrequencies() {
+        if (keywordsList.length === 0) {
+            alert("Agrega al menos una palabra clave.");
+            return;
+        }
+        const uniqueKeywords = [...new Set(keywordsList.map(k => normalizeText(k)))];
+        const startYear = 1880;
+        const endYear = 2026;
+        const years = Array.from({length: endYear - startYear + 1}, (_, i) => startYear + i);
+        
+        const tracesByKeyword = {};
+        for (const kw of uniqueKeywords) {
+            tracesByKeyword[kw] = new Array(years.length).fill(0);
+        }
+        for (const tesis of dataset) {
+            const year = tesis.año;
+            if (!year || year < startYear || year > endYear) continue;
+            const title = (tesis.titulo || "").toLowerCase();
+            for (const kw of uniqueKeywords) {
+                if (title.includes(kw)) {
+                    const idx = year - startYear;
+                    tracesByKeyword[kw][idx]++;
+                }
+            }
+        }
+        const rows = uniqueKeywords.length;
+        let fig = {
+            data: [],
+            layout: {
+                title: `Tendencias de palabras clave (subplots independientes)`,
+                height: 300 * rows,
+                showlegend: false,
+                grid: { rows: rows, columns: 1, pattern: 'independent' }
+            }
+        };
+        for (let i = 0; i < uniqueKeywords.length; i++) {
+            const kw = uniqueKeywords[i];
+            fig.data.push({
+                x: years,
+                y: tracesByKeyword[kw],
+                name: kw,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { shape: 'linear' },
+                yaxis: `y${i+1}`
+            });
+            fig.layout[`yaxis${i+1}`] = {
+                title: `Frecuencia (${kw})`,
+                domain: [(rows - i - 1) / rows, (rows - i) / rows]
+            };
+        }
+        fig.layout.xaxis = { title: 'Año', domain: [0,1] };
+        Plotly.newPlot(chartDiv, fig.data, fig.layout, { responsive: true });
+        chartDiv.style.display = 'block';
+    }
+    
+    // Botón de re‑ranking
+    const rerankButton = document.createElement('button');
+    rerankButton.textContent = '🤖 Reordenar con IA (Groq)';
+    rerankButton.style.marginTop = '1rem';
+    rerankButton.style.padding = '0.5rem 1rem';
+    rerankButton.style.borderRadius = '2rem';
+    rerankButton.style.border = 'none';
+    rerankButton.style.backgroundColor = '#6a4e2e';
+    rerankButton.style.color = 'white';
+    rerankButton.style.cursor = 'pointer';
+    rerankButton.onclick = rerankWithAI;
+    const resultsContainer = document.getElementById('resultsContainer');
+    if (resultsContainer) {
+        resultsContainer.parentNode.insertBefore(rerankButton, resultsContainer.nextSibling);
+    }
+    
+    plotBtn.addEventListener('click', plotKeywordFrequencies);
+    searchBtn.addEventListener('click', performSearch);
+    topKSelect.addEventListener('change', () => { if (lastQueryVector !== null) performSearch(); });
+    loadDataset();
+    getEmbedder();
+</script>
+</body>
+</html>
