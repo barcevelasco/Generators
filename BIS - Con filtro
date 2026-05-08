@@ -1,0 +1,86 @@
+## No recomendable, literalmente cada mes se pierde de vista información que en teoría, de origen, se buscaba conocer. 
+
+@st.cache_data(show_spinner=False)
+def load_data_bis(use_event_date=False):
+    """
+    Extractor BIS (BPI) - Discursos
+    
+    Parámetros:
+    -----------
+    use_event_date : bool
+        - False (default): Usa la fecha de publicación oficial del API
+        - True: Intenta extraer la fecha del evento desde el título/subtítulo
+    
+    NOTA: El uso de fechas de evento (use_event_date=True) es experimental y puede:
+        - Incluir discursos en meses incorrectos (ej: discurso de 2025 apareciendo en 2026)
+        - Perder discursos recién publicados (si el evento fue el mes anterior)
+        - Fallar en documentos sin formato consistente
+    Se recomienda mantener False para el boletín mensual estándar.
+    """
+    urls = ["https://www.bis.org/api/document_lists/cbspeeches.json", 
+            "https://www.bis.org/api/document_lists/bcbs_speeches.json", 
+            "https://www.bis.org/api/document_lists/mgmtspeeches.json"]
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    rows = []
+    
+    def extraer_fecha_evento(titulo, link):
+        """Intenta extraer fecha del evento desde el título o descripción"""
+        # Patrones comunes: "Oslo, 5 May 2025" o "Kuala Lumpur, 29 April 2026"
+        patrones = [
+            r'(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})',  # "5 May 2025"
+            r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})'  # "May 5, 2025"
+        ]
+        
+        for patron in patrones:
+            match = re.search(patron, titulo)
+            if match:
+                try:
+                    if match.group(1).isdigit():
+                        dia = int(match.group(1))
+                        mes_str = match.group(2)
+                        año = int(match.group(3))
+                    else:
+                        mes_str = match.group(1)
+                        dia = int(match.group(2))
+                        año = int(match.group(3))
+                    
+                    meses = {
+                        'january':1, 'february':2, 'march':3, 'april':4, 'may':5, 'june':6,
+                        'july':7, 'august':8, 'september':9, 'october':10, 'november':11, 'december':12,
+                        'jan':1, 'feb':2, 'mar':3, 'apr':4, 'may':5, 'jun':6,
+                        'jul':7, 'aug':8, 'sep':9, 'oct':10, 'nov':11, 'dec':12
+                    }
+                    mes_num = meses.get(mes_str.lower()[:3], 1)
+                    return datetime.datetime(año, mes_num, dia)
+                except:
+                    pass
+        return None
+    
+    for url in urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            data = response.json()
+            for path, speech in data.get("list", {}).items():
+                title = html.unescape(speech.get("short_title", ""))
+                date_str = speech.get("publication_start_date", "")
+                link = "https://www.bis.org" + path + (".htm" if not path.endswith(".htm") else "")
+                
+                # Determinar qué fecha usar
+                if use_event_date:
+                    evento_date = extraer_fecha_evento(title, link)
+                    if evento_date:
+                        rows.append({"Date": evento_date, "Title": title, "Link": link, "Organismo": "BPI"})
+                    else:
+                        # Fallback a fecha de publicación si no se encuentra evento
+                        rows.append({"Date": date_str, "Title": title, "Link": link, "Organismo": "BPI"})
+                else:
+                    # Usar fecha de publicación por defecto (recomendado)
+                    rows.append({"Date": date_str, "Title": title, "Link": link, "Organismo": "BPI"})
+        except: 
+            continue
+    
+    df = pd.DataFrame(rows).drop_duplicates(subset=['Link']) if rows else pd.DataFrame()
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date", ascending=False)
+    return df
