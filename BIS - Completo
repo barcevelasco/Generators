@@ -1,0 +1,22 @@
+@st.cache_data(show_spinner=False)
+def load_data_bis():
+    urls = ["https://www.bis.org/api/document_lists/cbspeeches.json", 
+            "https://www.bis.org/api/document_lists/bcbs_speeches.json", 
+            "https://www.bis.org/api/document_lists/mgmtspeeches.json"]
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    rows = []
+    for url in urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            data = response.json()
+            for path, speech in data.get("list", {}).items():
+                title = html.unescape(speech.get("short_title", ""))
+                date_str = speech.get("publication_start_date", "")
+                link = "https://www.bis.org" + path + (".htm" if not path.endswith(".htm") else "")
+                rows.append({"Date": date_str, "Title": title, "Link": link, "Organismo": "BPI"})
+        except: continue
+    df = pd.DataFrame(rows).drop_duplicates(subset=['Link']) if rows else pd.DataFrame()
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date", ascending=False)
+    return df
